@@ -303,6 +303,9 @@ class StreakLabTestCase(unittest.TestCase):
         # today: completed (increments to 2)
         self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d2, "status": "completed"})
         self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d1, "status": "skipped"})
+        res = self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d0, "status": "completed"})
+        self.assertEqual(res.get_json()['streak'], 2)
+
     def test_streak_with_today_pending(self):
         """If today has no record yet, yesterday's completed streak remains active."""
         create_res = self.client.post('/api/habits', json={"name": "Pending Streak Habit"})
@@ -347,6 +350,250 @@ class StreakLabTestCase(unittest.TestCase):
                     "INSERT INTO habit_records (habit_id, record_date, status) VALUES (?, '2026-10-21', 'missed')",
                     (habit_id,)
                 )
+
+    # -----------------------------------------------------------------------
+    # 5. PHASE 3: HABIT PATTERN DETECTION & ANALYTICS TESTS
+    # -----------------------------------------------------------------------
+    def test_phase3_empty_database(self):
+        """Empty database should safely return summary with 0 active habits and no_habits insight."""
+        res = self.client.get('/api/insights')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data['summary']['total_active_habits'], 0)
+        self.assertEqual(data['summary']['total_records'], 0)
+        self.assertEqual(data['summary']['overall_completion_rate'], 0.0)
+        self.assertTrue(any(i['type'] == 'no_habits' for i in data['insights']))
+
+    def test_phase3_newly_created_habit_no_records(self):
+        """A newly created habit with 0 records should handle division by zero and report insufficient data."""
+        self.client.post('/api/habits', json={"name": "Brand New Habit", "category": "Mindfulness"})
+        res = self.client.get('/api/insights')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data['summary']['total_active_habits'], 1)
+        self.assertEqual(data['summary']['total_records'], 0)
+        self.assertEqual(data['summary']['overall_completion_rate'], 0.0)
+        self.assertTrue(any(i['type'] == 'insufficient_data' for i in data['insights']))
+
+    def test_phase3_consistently_completed_habit(self):
+        """Habit with >=80% completion over >=5 evaluated records triggers strong_routine insight."""
+        create_res = self.client.post('/api/habits', json={"name": "Coding Practice", "category": "Coding"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        # Log 8 completed records and 1 missed record (88.9% rate)
+        for i in range(8):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "completed"})
+        self.client.post('/api/records', json={"habit_id": habit_id, "record_date": (today - timedelta(days=8)).isoformat(), "status": "missed"})
+
+        res = self.client.get('/api/insights')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        strong_insights = [i for i in data['insights'] if i['type'] == 'strong_routine']
+        self.assertTrue(len(strong_insights) >= 1)
+        self.assertEqual(strong_insights[0]['habit_id'], habit_id)
+        self.assertGreaterEqual(strong_insights[0]['evidence']['completion_rate'], 80.0)
+        self.assertIn('recommendation', strong_insights[0])
+        self.assertIn(strong_insights[0]['confidence'], ['low', 'medium', 'high'])
+
+    def test_phase3_repeated_missed_habit(self):
+        """Habit with consecutive misses triggers repeated_misses insight."""
+        create_res = self.client.post('/api/habits', json={"name": "Gym Workout", "category": "Fitness"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        # Log 4 consecutive missed days
+        for i in range(4):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "missed"})
+
+        res = self.client.get('/api/insights')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        missed_insights = [i for i in data['insights'] if i['type'] in ('repeated_misses', 'at_risk_habit')]
+        self.assertTrue(len(missed_insights) >= 1)
+        self.assertIn('recommendation', missed_insights[0])
+
+    def test_phase3_skipped_records_do_not_penalize_completion_rate(self):
+        """Skipped records are treated as excused rest days and do not lower the active execution rate."""
+        create_res = self.client.post('/api/habits', json={"name": "Piano Practice", "category": "Learning"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        # 5 completed days and 2 skipped days (0 missed)
+        for i in range(5):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "completed"})
+        for i in range(5, 7):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "skipped"})
+
+        res = self.client.get(f'/api/insights/{habit_id}')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        # completed / (completed + missed) = 5 / (5 + 0) = 100.0%
+        self.assertEqual(data['statistics']['completion_rate'], 100.0)
+        self.assertEqual(data['statistics']['skipped'], 2)
+        self.assertEqual(data['statistics']['completed'], 5)
+
+    def test_phase3_weekday_patterns(self):
+        """Different completion rates across weekdays trigger weekday pattern insights."""
+        create_res = self.client.post('/api/habits', json={"name": "Reading Book", "category": "Learning"})
+        habit_id = create_res.get_json()['id']
+
+        # Log records across past 28 days:
+        # Find 3 Sundays and mark missed, find other days and mark completed
+        today = date.today()
+        for i in range(21):
+            d_obj = today - timedelta(days=i)
+            status = "missed" if d_obj.weekday() == 6 else "completed"
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d_obj.isoformat(), "status": status})
+
+        res = self.client.get('/api/insights')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        insights_types = [i['type'] for i in data['insights']]
+        # Sunday drop-off or peak day should be detected
+        self.assertTrue('weekday_dropoff' in insights_types or 'peak_performance_day' in insights_types or 'strong_routine' in insights_types)
+
+    def test_phase3_time_of_day_analysis(self):
+        """Comparison between Morning and Evening habits when sufficient data exists."""
+        # Morning habit with high completions
+        m_res = self.client.post('/api/habits', json={"name": "Morning Run", "category": "Fitness", "time_of_day": "Morning"})
+        m_id = m_res.get_json()['id']
+        # Evening habit with low completions
+        e_res = self.client.post('/api/habits', json={"name": "Evening Journal", "category": "Productivity", "time_of_day": "Evening"})
+        e_id = e_res.get_json()['id']
+
+        today = date.today()
+        # 6 completed mornings (100% rate)
+        for i in range(6):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": m_id, "record_date": d, "status": "completed"})
+
+        # 6 missed evenings (0% rate)
+        for i in range(6):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": e_id, "record_date": d, "status": "missed"})
+
+        res = self.client.get('/api/insights')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        tod_insights = [i for i in data['insights'] if i['type'] == 'time_of_day_preference']
+        self.assertTrue(len(tod_insights) >= 1)
+        self.assertEqual(tod_insights[0]['evidence']['best_time_of_day'], 'Morning')
+        self.assertEqual(tod_insights[0]['evidence']['worst_time_of_day'], 'Evening')
+
+    def test_phase3_insufficient_historical_data(self):
+        """Fewer than 3 records returns insufficient_data guidance insight."""
+        create_res = self.client.post('/api/habits', json={"name": "Guitar", "category": "Learning"})
+        habit_id = create_res.get_json()['id']
+        today = date.today().isoformat()
+        # Only 1 record
+        self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "completed"})
+
+        res = self.client.get('/api/insights')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(any(i['type'] == 'insufficient_data' for i in data['insights']))
+
+    def test_phase3_invalid_days_param(self):
+        """Invalid 'days' parameter returns HTTP 400 Bad Request with clear error message."""
+        # Non-numeric
+        res1 = self.client.get('/api/insights?days=abc')
+        self.assertEqual(res1.status_code, 400)
+        self.assertIn("days parameter", res1.get_json().get("error", ""))
+
+        # Zero or negative
+        res2 = self.client.get('/api/insights?days=0')
+        self.assertEqual(res2.status_code, 400)
+
+        # Exceeds maximum 365
+        res3 = self.client.get('/api/insights?days=999')
+        self.assertEqual(res3.status_code, 400)
+
+        # Also test on /api/analytics
+        res4 = self.client.get('/api/analytics?days=-5')
+        self.assertEqual(res4.status_code, 400)
+
+    def test_phase3_nonexistent_and_inactive_habit_id(self):
+        """GET /api/insights/<id> returns 404 for nonexistent or deactivated habit."""
+        # Nonexistent ID
+        res1 = self.client.get('/api/insights/99999')
+        self.assertEqual(res1.status_code, 404)
+
+        # Deactivated habit
+        create_res = self.client.post('/api/habits', json={"name": "Archived Habit"})
+        habit_id = create_res.get_json()['id']
+        self.client.delete(f'/api/habits/{habit_id}')
+
+        res2 = self.client.get(f'/api/insights/{habit_id}')
+        self.assertEqual(res2.status_code, 404)
+
+    def test_phase3_exclude_future_records(self):
+        """Records with dates in the future must be excluded from historical calculations."""
+        create_res = self.client.post('/api/habits', json={"name": "Future Test", "category": "General"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+        future_date = (today + timedelta(days=5)).isoformat()
+        past_date = (today - timedelta(days=1)).isoformat()
+
+        # Log 1 past completion and 1 future missed
+        self.client.post('/api/records', json={"habit_id": habit_id, "record_date": past_date, "status": "completed"})
+        self.client.post('/api/records', json={"habit_id": habit_id, "record_date": future_date, "status": "missed"})
+
+        res = self.client.get(f'/api/insights/{habit_id}?date={today.isoformat()}')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        # Future record should be excluded: total_records=1, completed=1, missed=0
+        self.assertEqual(data['statistics']['total_records'], 1)
+        self.assertEqual(data['statistics']['completed'], 1)
+        self.assertEqual(data['statistics']['missed'], 0)
+
+    def test_phase3_division_by_zero_edge_case(self):
+        """Habit with only skipped records avoids division by zero and reports 0.0% completion rate."""
+        create_res = self.client.post('/api/habits', json={"name": "Skipped Only", "category": "General"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        # Log 3 skipped days
+        for i in range(3):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "skipped"})
+
+        res = self.client.get(f'/api/insights/{habit_id}')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data['statistics']['completed'], 0)
+        self.assertEqual(data['statistics']['missed'], 0)
+        self.assertEqual(data['statistics']['skipped'], 3)
+        self.assertEqual(data['statistics']['completion_rate'], 0.0)
+
+    def test_phase3_json_response_structure_and_analytics(self):
+        """Verify complete JSON structure for /api/analytics and /api/insights."""
+        create_res = self.client.post('/api/habits', json={"name": "Analytics Habit", "category": "Productivity", "time_of_day": "Afternoon"})
+        habit_id = create_res.get_json()['id']
+        today = date.today().isoformat()
+        self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "completed"})
+
+        # Test /api/analytics
+        res = self.client.get('/api/analytics?days=7')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn('period', data)
+        self.assertIn('summary', data)
+        self.assertIn('daily_trend', data)
+        self.assertIn('weekday_statistics', data)
+        self.assertIn('habit_breakdown', data)
+        self.assertIn('time_of_day_distribution', data)
+
+        # Check daily_trend contains 7 days
+        self.assertEqual(len(data['daily_trend']), 7)
+        # Check weekday_statistics contains 7 days (Mon-Sun)
+        self.assertEqual(len(data['weekday_statistics']), 7)
+        # Check habit_breakdown contains created habit
+        self.assertTrue(any(h['id'] == habit_id for h in data['habit_breakdown']))
 
 
 if __name__ == '__main__':

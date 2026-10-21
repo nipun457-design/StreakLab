@@ -36,7 +36,7 @@
           <span class="brand-text">Streak<span class="brand-text-accent">Lab</span></span>
           <span class="brand-subtext">Habit Pattern Detector</span>
         </div>
-        <span class="badge bg-indigo-subtle text-indigo border border-indigo-subtle ms-2 rounded-pill d-none d-sm-inline-block">Phase 2B • SQLite Powered</span>
+        <span class="badge bg-indigo-subtle text-indigo border border-indigo-subtle ms-2 rounded-pill d-none d-sm-inline-block">Phase 3 • Pattern Engine</span>
       </a>
 
       <!-- Navbar Right Controls -->
@@ -313,51 +313,49 @@
             </div>
           </div>
 
-          <!-- CARD 3: AI PATTERN DETECTOR PREVIEW (PHASE 4 TEASER) -->
+          <!-- CARD 3: HABIT PATTERN DETECTOR (PHASE 3) -->
           <div class="card border-0 shadow-sm rounded-4 ai-insight-card">
             <div class="card-body p-4">
-              <div class="d-flex align-items-center gap-2 mb-3">
-                <div class="ai-badge-icon">
-                  <i class="bi bi-cpu-fill text-white"></i>
-                </div>
-                <div>
-                  <h4 class="h6 fw-bold mb-0 text-dark">AI Habit Pattern Detector</h4>
-                  <span class="badge bg-purple-subtle text-purple border border-purple-subtle rounded-pill small">
-                    Phase 4 Statistical Preview
-                  </span>
-                </div>
-              </div>
-
-              <div class="d-flex flex-column gap-3">
-                <div class="insight-item p-3 rounded-3 bg-white border">
-                  <div class="d-flex align-items-start gap-2">
-                    <i class="bi bi-graph-up-arrow text-success fs-5 mt-1"></i>
-                    <div>
-                      <p class="fw-semibold mb-0 small text-dark">Optimal Routine Window</p>
-                      <p class="text-muted small mb-0">
-                        Morning habits show an <strong class="text-success">85% higher completion rate</strong> than evening habits.
-                      </p>
-                    </div>
+              <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+                <div class="d-flex align-items-center gap-2">
+                  <div class="ai-badge-icon">
+                    <i class="bi bi-cpu-fill text-white"></i>
+                  </div>
+                  <div>
+                    <h4 class="h6 fw-bold mb-0 text-dark">Habit Pattern Detector</h4>
+                    <span class="badge bg-purple-subtle text-purple border border-purple-subtle rounded-pill small">
+                      Phase 3 • Pattern Engine
+                    </span>
                   </div>
                 </div>
 
-                <div class="insight-item p-3 rounded-3 bg-white border">
-                  <div class="d-flex align-items-start gap-2">
-                    <i class="bi bi-exclamation-triangle text-warning fs-5 mt-1"></i>
-                    <div>
-                      <p class="fw-semibold mb-0 small text-dark">Weekend Drop-off Notice</p>
-                      <p class="text-muted small mb-0">
-                        Habits scheduled on Sundays have a <strong class="text-warning-emphasis">35% drop</strong>. Consider setting a reminder 15 min earlier.
-                      </p>
-                    </div>
-                  </div>
+                <!-- Configurable Analysis Window Selector -->
+                <div class="d-flex align-items-center gap-1">
+                  <select id="insightsPeriodSelect" class="form-select form-select-sm rounded-pill border shadow-sm small py-1 px-2" style="font-size: 0.78rem;" aria-label="Analysis Window">
+                    <option value="7">Last 7 Days</option>
+                    <option value="14">Last 14 Days</option>
+                    <option value="30" selected>Last 30 Days</option>
+                    <option value="60">Last 60 Days</option>
+                    <option value="90">Last 90 Days</option>
+                  </select>
                 </div>
               </div>
 
-              <div class="mt-3 pt-2 border-top text-center">
-                <span class="text-muted small">
-                  <i class="bi bi-info-circle me-1"></i>
-                  Python & Pandas statistical engine will be integrated in Phase 4.
+              <!-- Dynamic Container for Detected Patterns -->
+              <div id="insightsContainer" class="d-flex flex-column gap-3">
+                <div class="text-center py-4 text-muted small">
+                  <div class="spinner-border spinner-border-sm text-primary mb-2" role="status"></div>
+                  <div>Analyzing habit patterns...</div>
+                </div>
+              </div>
+
+              <!-- Card Footer with Statistical Metadata -->
+              <div class="mt-3 pt-2 border-top d-flex justify-content-between align-items-center flex-wrap gap-2 small text-muted">
+                <span id="insightsMetaSpan">
+                  <i class="bi bi-shield-check text-success me-1"></i>Rule-based statistical engine
+                </span>
+                <span id="insightsPeriodSpan" class="badge bg-light text-muted border rounded-pill">
+                  Window: 30 Days
                 </span>
               </div>
             </div>

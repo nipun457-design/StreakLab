@@ -16,6 +16,7 @@ import os
 import sqlite3
 from datetime import datetime, timedelta, date
 from flask import Flask, render_template, jsonify, request, g
+from pattern_engine import analyze_habit_patterns, analyze_single_habit, get_habit_analytics
 
 # Initialize Flask application
 app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -559,6 +560,99 @@ def get_habit_records_history(habit_id):
             "updated_at": str(row["updated_at"])
         })
     return jsonify(records), 200
+
+
+# ---------------------------------------------------------------------------
+# PHASE 3: HABIT PATTERN DETECTION & ANALYTICS REST API ENDPOINTS
+# ---------------------------------------------------------------------------
+
+def parse_days_param(request_obj, default=30, min_days=1, max_days=365):
+    """Validates and parses the 'days' query parameter for statistical windows."""
+    raw_days = request_obj.args.get('days')
+    if raw_days is None:
+        return default, None
+    try:
+        days = int(raw_days)
+        if days < min_days or days > max_days:
+            return None, f"days parameter must be an integer between {min_days} and {max_days}"
+        return days, None
+    except (ValueError, TypeError):
+        return None, f"days parameter must be a valid integer between {min_days} and {max_days}"
+
+
+def parse_date_param(request_obj):
+    """Validates and parses the 'date' query parameter."""
+    raw_date = request_obj.args.get('date')
+    if raw_date is None:
+        return date.today().isoformat(), None
+    try:
+        datetime.strptime(raw_date, "%Y-%m-%d")
+        return raw_date, None
+    except ValueError:
+        return None, "Invalid date format. Expected YYYY-MM-DD"
+
+
+@app.route('/api/insights', methods=['GET'])
+def get_insights():
+    """
+    Returns an overall summary and a list of rule-based insights detected
+    from actual SQLite habit records.
+    Query parameters:
+      - days: integer window (default 30, min 1, max 365)
+      - date: YYYY-MM-DD reference date (defaults to today)
+    """
+    days, err = parse_days_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+
+    db = get_db()
+    insights_data = analyze_habit_patterns(days=days, target_date_str=target_date, db=db)
+    return jsonify(insights_data), 200
+
+
+@app.route('/api/insights/<int:habit_id>', methods=['GET'])
+def get_single_habit_insights(habit_id):
+    """
+    Returns detailed statistics, weekday breakdown, and targeted patterns
+    for a particular active habit.
+    Returns 404 if the habit is nonexistent or inactive.
+    """
+    days, err = parse_days_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+
+    db = get_db()
+    result = analyze_single_habit(habit_id=habit_id, days=days, target_date_str=target_date, db=db)
+    if result is None:
+        return jsonify({"error": "Habit not found or inactive"}), 404
+    return jsonify(result), 200
+
+
+@app.route('/api/analytics', methods=['GET'])
+def get_analytics():
+    """
+    Returns structured data for dashboard visualizations:
+      - daily completion rates and counts over the analysis window
+      - weekday statistics (Mon - Sun)
+      - habit-wise breakdown with completion rates and streaks
+      - time-of-day distribution comparison
+    """
+    days, err = parse_days_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+
+    db = get_db()
+    analytics_data = get_habit_analytics(days=days, target_date_str=target_date, db=db)
+    return jsonify(analytics_data), 200
 
 
 # ---------------------------------------------------------------------------

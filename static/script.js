@@ -25,6 +25,7 @@ let timeOfDayChartInstance = null;
 let isSubmittingHabit = false;
 const activeRecordRequests = new Set();
 const activeDeleteRequests = new Set();
+let currentInsightsDays = 30;
 
 // Category visual styling configuration
 const CATEGORY_CONFIG = {
@@ -44,7 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Step A: Display formatted local date in top navigation
   displayCurrentDate();
 
-  // Step B: Set up user event listeners (form submissions, filter tabs)
+  // Step B: Set up user event listeners (form submissions, filter tabs, period selector)
   setupEventListeners();
 
   // Step C: Initialize Chart.js interactive graphs with empty/initial state
@@ -52,6 +53,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Step D: Load habits from the SQLite database via Flask REST API
   loadHabitsFromApi();
+
+  // Step E: Load rule-based habit pattern insights (Phase 3)
+  loadInsightsFromApi(currentInsightsDays);
 });
 
 /**
@@ -110,6 +114,7 @@ async function loadHabitsFromApi() {
     renderHabits();
     updateSummaryMetrics();
     updateCharts();
+    loadInsightsFromApi(currentInsightsDays);
 
   } catch (error) {
     console.error("StreakLab: Could not load habits from API:", error);
@@ -490,6 +495,7 @@ async function handleStatusChange(habitId, targetStatus) {
 
     updateSummaryMetrics();
     updateCharts();
+    loadInsightsFromApi(currentInsightsDays);
 
   } catch (error) {
     console.error("Failed to update habit record:", error);
@@ -532,6 +538,7 @@ async function deleteHabit(habitId) {
     showToast(`Habit "${habit.name}" archived successfully.`, "secondary");
     updateSummaryMetrics();
     updateCharts();
+    loadInsightsFromApi(currentInsightsDays);
 
   } catch (error) {
     console.error("Failed to deactivate habit:", error);
@@ -616,6 +623,7 @@ function setupEventListeners() {
         renderHabits();
         updateSummaryMetrics();
         updateCharts();
+        loadInsightsFromApi(currentInsightsDays);
 
       } catch (error) {
         console.error("Failed to create habit:", error);
@@ -627,6 +635,16 @@ function setupEventListeners() {
           submitBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save Habit`;
         }
       }
+    });
+  }
+
+  // Configurable Insights Analysis Window Selector (Phase 3)
+  const periodSelect = document.getElementById("insightsPeriodSelect");
+  if (periodSelect) {
+    periodSelect.addEventListener("change", (e) => {
+      const val = parseInt(e.target.value, 10) || 30;
+      currentInsightsDays = val;
+      loadInsightsFromApi(val);
     });
   }
 
@@ -817,8 +835,34 @@ function getPast7DaysLabels() {
 
 /**
  * Recalculates chart datasets and updates active Chart.js instances.
+ * Fetches real SQLite analytics over 7 days, falling back to local calculation if offline.
  */
-function updateCharts() {
+async function updateCharts() {
+  try {
+    const today = getTodayDateString();
+    const res = await fetch(`/api/analytics?days=7&date=${encodeURIComponent(today)}`);
+    if (res.ok) {
+      const data = await res.json();
+      if (weeklyChartInstance && Array.isArray(data.daily_trend)) {
+        weeklyChartInstance.data.datasets[0].data = data.daily_trend.map(d => d.completed);
+        weeklyChartInstance.update();
+      }
+      if (timeOfDayChartInstance && data.time_of_day_distribution) {
+        const tod = data.time_of_day_distribution;
+        timeOfDayChartInstance.data.datasets[0].data = [
+          tod.Morning ? tod.Morning.total : 0,
+          tod.Afternoon ? tod.Afternoon.total : 0,
+          tod.Evening ? tod.Evening.total : 0
+        ];
+        timeOfDayChartInstance.update();
+      }
+      return;
+    }
+  } catch (err) {
+    console.warn("Analytics fetch fallback to local calculation:", err);
+  }
+
+  // Fallback to in-memory calculation if analytics endpoint is unreachable
   if (weeklyChartInstance) {
     weeklyChartInstance.data.datasets[0].data = calculateWeeklyConsistency();
     weeklyChartInstance.update();
@@ -929,4 +973,154 @@ function escapeHtml(str) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#039;");
+}
+
+// ----------------------------------------------------------------------------
+// 10. HABIT PATTERN DETECTOR INSIGHTS (PHASE 3)
+// ----------------------------------------------------------------------------
+
+/**
+ * Loads rule-based habit pattern insights from the Flask API (GET /api/insights).
+ * Does not use fabricated insights on error; displays friendly feedback.
+ */
+async function loadInsightsFromApi(days = 30) {
+  const container = document.getElementById("insightsContainer");
+  const periodSpan = document.getElementById("insightsPeriodSpan");
+  const metaSpan = document.getElementById("insightsMetaSpan");
+
+  if (periodSpan) {
+    periodSpan.textContent = `Window: ${days} Days`;
+  }
+
+  if (container) {
+    container.innerHTML = `
+      <div class="text-center py-4 text-muted small">
+        <span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>
+        <span>Analyzing habit patterns...</span>
+      </div>
+    `;
+  }
+
+  try {
+    const today = getTodayDateString();
+    const response = await fetch(`/api/insights?days=${encodeURIComponent(days)}&date=${encodeURIComponent(today)}`);
+
+    if (!response.ok) {
+      const err = await response.json().catch(() => ({}));
+      throw new Error(err.error || `Server returned HTTP ${response.status}`);
+    }
+
+    const data = await response.json();
+
+    if (metaSpan && data.summary) {
+      const s = data.summary;
+      metaSpan.innerHTML = `
+        <i class="bi bi-shield-check text-success me-1"></i>${s.total_completed || 0} done / ${s.total_missed || 0} missed (${s.overall_completion_rate || 0}%)
+      `;
+    }
+
+    renderInsights(data.insights || [], days);
+
+  } catch (error) {
+    console.error("StreakLab: Could not load insights:", error);
+    if (container) {
+      container.innerHTML = `
+        <div class="alert alert-warning p-3 rounded-3 small mb-0 d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
+          <div>
+            <i class="bi bi-exclamation-triangle-fill text-warning me-1"></i>
+            <span>Unable to load habit patterns.</span>
+          </div>
+          <button class="btn btn-sm btn-outline-dark rounded-pill px-3 py-1" onclick="loadInsightsFromApi(${days})">
+            <i class="bi bi-arrow-clockwise me-1"></i>Retry
+          </button>
+        </div>
+      `;
+    }
+  }
+}
+
+/**
+ * Renders detected insights into the #insightsContainer element.
+ * Distinguishes strong routines, at-risk habits, weekday drop-offs, peak days,
+ * time-of-day preferences, repeated misses, and milestone streaks.
+ */
+function renderInsights(insightsList, periodDays = 30) {
+  const container = document.getElementById("insightsContainer");
+  if (!container) return;
+
+  if (!Array.isArray(insightsList) || insightsList.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-4 text-muted small">
+        <i class="bi bi-clipboard-data fs-3 d-block mb-2 text-primary opacity-50"></i>
+        <div class="fw-semibold text-dark">No Patterns Detected Yet</div>
+        <div class="text-muted">Keep checking in daily to discover your routine rhythms.</div>
+      </div>
+    `;
+    return;
+  }
+
+  // Type configuration for icons & borders
+  const typeIcons = {
+    "strong_routine": { icon: "bi-graph-up-arrow text-success", border: "border-success-subtle" },
+    "at_risk_habit": { icon: "bi-exclamation-triangle text-danger", border: "border-danger-subtle" },
+    "weekday_dropoff": { icon: "bi-calendar-x text-warning", border: "border-warning-subtle" },
+    "peak_performance_day": { icon: "bi-award-fill text-primary", border: "border-primary-subtle" },
+    "time_of_day_preference": { icon: "bi-clock-history text-indigo", border: "border-indigo-subtle" },
+    "repeated_misses": { icon: "bi-arrow-repeat text-danger", border: "border-danger-subtle" },
+    "streak_milestone": { icon: "bi-fire text-orange", border: "border-warning-subtle" },
+    "insufficient_data": { icon: "bi-hourglass-split text-primary", border: "border-primary-subtle" },
+    "no_habits": { icon: "bi-plus-circle text-primary", border: "border-primary-subtle" }
+  };
+
+  const confidenceBadges = {
+    "high": `<span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill small" title="Substantial sample size">High Confidence</span>`,
+    "medium": `<span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle rounded-pill small" title="Moderate sample size">Medium Confidence</span>`,
+    "low": `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill small" title="Initial observations">Low Confidence</span>`
+  };
+
+  container.innerHTML = insightsList.map(insight => {
+    const config = typeIcons[insight.type] || { icon: "bi-lightbulb-fill text-primary", border: "border" };
+    const confBadge = confidenceBadges[insight.confidence] || confidenceBadges["low"];
+
+    // Format evidence display if available
+    let evidenceHtml = "";
+    if (insight.evidence) {
+      const ev = insight.evidence;
+      const bits = [];
+      if (typeof ev.completion_rate === "number") bits.push(`Rate: <strong>${ev.completion_rate}%</strong>`);
+      if (typeof ev.completed === "number" && typeof ev.missed === "number") bits.push(`${ev.completed} done / ${ev.missed} missed`);
+      if (typeof ev.consecutive_misses === "number") bits.push(`<strong>${ev.consecutive_misses} misses in a row</strong>`);
+      if (typeof ev.sample_size === "number") bits.push(`Sample: ${ev.sample_size} check-ins`);
+      if (typeof ev.rate_difference === "number") bits.push(`Gap: +${ev.rate_difference}%`);
+
+      if (bits.length > 0) {
+        evidenceHtml = `
+          <div class="d-flex flex-wrap align-items-center gap-2 mt-2 pt-1 small text-muted">
+            <span class="badge bg-light text-dark border"><i class="bi bi-bar-chart me-1"></i>Evidence:</span>
+            <span>${bits.join(" &bull; ")}</span>
+          </div>
+        `;
+      }
+    }
+
+    return `
+      <div class="insight-item p-3 rounded-3 bg-white border ${config.border} shadow-sm">
+        <div class="d-flex align-items-start justify-content-between gap-2 mb-1">
+          <div class="d-flex align-items-center gap-2">
+            <i class="bi ${config.icon} fs-5"></i>
+            <h6 class="fw-bold mb-0 text-dark small">${escapeHtml(insight.title)}</h6>
+          </div>
+          ${confBadge}
+        </div>
+        <p class="text-muted small mb-0 mt-1">${escapeHtml(insight.message)}</p>
+        ${evidenceHtml}
+        ${insight.recommendation ? `
+          <div class="mt-2 pt-2 border-top small text-muted">
+            <strong class="text-dark"><i class="bi bi-lightbulb text-warning me-1"></i>Recommendation:</strong>
+            ${escapeHtml(insight.recommendation)}
+          </div>
+        ` : ""}
+      </div>
+    `;
+  }).join("");
 }
