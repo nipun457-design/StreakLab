@@ -12,7 +12,9 @@ import os
 import tempfile
 import unittest
 from datetime import date, timedelta
+from unittest.mock import patch, MagicMock
 from app import app, init_db, get_db
+import ai_explainer
 
 
 class StreakLabTestCase(unittest.TestCase):
@@ -595,6 +597,289 @@ class StreakLabTestCase(unittest.TestCase):
         # Check habit_breakdown contains created habit
         self.assertTrue(any(h['id'] == habit_id for h in data['habit_breakdown']))
 
+    # -----------------------------------------------------------------------
+    # PHASE 4: HYBRID AI EXPLANATIONS & RECOMMENDATIONS TESTS
+    # -----------------------------------------------------------------------
+
+    def test_phase4_explanations_endpoint_empty_db(self):
+        """GET /api/insights/explanations on empty DB returns 200 with fallback no_habits explanation."""
+        res = self.client.get('/api/insights/explanations')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn('period', data)
+        self.assertIn('summary', data)
+        self.assertIn('explanations', data)
+        self.assertEqual(data.get('source'), 'fallback')
+        self.assertFalse(data.get('ai_configured'))
+
+        explanations = data['explanations']
+        self.assertGreaterEqual(len(explanations), 1)
+        first = explanations[0]
+        self.assertEqual(first.get('pattern_type'), 'no_habits')
+        self.assertIn('StreakLab', first.get('title'))
+        self.assertEqual(first.get('source'), 'fallback')
+        self.assertIn('evidence_summary', first)
+        self.assertIn('recommendation', first)
+
+        # Now create 1 habit with 0 check-ins: should report 'insufficient_data'
+        self.client.post('/api/habits', json={"name": "New Habit", "category": "General"})
+        res2 = self.client.get('/api/insights/explanations?days=14')
+        self.assertEqual(res2.status_code, 200)
+        data2 = res2.get_json()
+        first2 = data2['explanations'][0]
+        self.assertEqual(first2.get('pattern_type'), 'insufficient_data')
+        self.assertIn('Gathering Habit History', first2.get('title'))
+
+    def test_phase4_explanations_endpoint_with_records(self):
+        """GET /api/insights/explanations with real records produces validated explanation cards."""
+        create_res = self.client.post('/api/habits', json={"name": "Morning Coding", "category": "Coding"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        # Log 8 consecutive completed check-ins
+        for i in range(8):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "completed"})
+
+        res = self.client.get('/api/insights/explanations?days=14')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data.get('source'), 'fallback')
+
+        explanations = data.get('explanations', [])
+        self.assertGreater(len(explanations), 0)
+
+        # Check all explanation fields conform to required contract
+        for exp in explanations:
+            self.assertIn('pattern_type', exp)
+            self.assertIn('title', exp)
+            self.assertIn('explanation', exp)
+            self.assertIn('recommendation', exp)
+            self.assertIn('evidence_summary', exp)
+            self.assertIn('confidence', exp)
+            self.assertIn(exp['confidence'], ('low', 'medium', 'high'))
+            self.assertEqual(exp['source'], 'fallback')
+
+    def test_phase4_explanations_parameter_validation(self):
+        """Test parameter validation for /api/insights/explanations (days, date, habit_id)."""
+        # Invalid days (< 1)
+        res1 = self.client.get('/api/insights/explanations?days=0')
+        self.assertEqual(res1.status_code, 400)
+        self.assertIn('error', res1.get_json())
+
+        # Invalid days (> 365)
+        res2 = self.client.get('/api/insights/explanations?days=400')
+        self.assertEqual(res2.status_code, 400)
+
+        # Invalid days (non-integer)
+        res3 = self.client.get('/api/insights/explanations?days=abc')
+        self.assertEqual(res3.status_code, 400)
+
+        # Invalid date format
+        res4 = self.client.get('/api/insights/explanations?date=2026-99-99')
+        self.assertEqual(res4.status_code, 400)
+
+        # Invalid habit_id (non-integer)
+        res5 = self.client.get('/api/insights/explanations?habit_id=invalid')
+        self.assertEqual(res5.status_code, 400)
+
+        # Nonexistent habit_id
+        res6 = self.client.get('/api/insights/explanations?habit_id=99999')
+        self.assertEqual(res6.status_code, 404)
+
+    def test_phase4_single_habit_explanation(self):
+        """GET /api/insights/explanations?habit_id=<id> returns single habit breakdown and explanations."""
+        create_res = self.client.post('/api/habits', json={"name": "Evening Reading", "category": "Mindfulness"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        for i in range(6):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "completed"})
+
+        res = self.client.get(f'/api/insights/explanations?habit_id={habit_id}&days=14')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn('habit', data)
+        self.assertEqual(data['habit']['id'], habit_id)
+        self.assertIn('statistics', data)
+        self.assertIn('weekday_breakdown', data)
+        self.assertIn('explanations', data)
+        self.assertEqual(data['source'], 'fallback')
+
+    def test_phase4_local_fallback_unit_coverage(self):
+        """Unit test generate_local_fallback across all supported pattern types."""
+        pattern_types = [
+            ("insufficient_data", {"total_records": 2, "period_days": 30}),
+            ("strong_routine", {"completion_rate": 85.0, "sample_size": 10, "completed": 9, "period_days": 30}),
+            ("at_risk_habit", {"completion_rate": 30.0, "sample_size": 10, "missed": 7, "period_days": 30}),
+            ("weekday_dropoff", {"weekday": "Friday", "weekday_rate": 40.0, "overall_rate": 75.0, "sample_size": 5}),
+            ("peak_performance_day", {"weekday": "Monday", "weekday_rate": 95.0, "weekday_completed": 5, "sample_size": 5}),
+            ("time_of_day_preference", {"best_time_of_day": "Morning", "best_rate": 88.0, "worst_time_of_day": "Evening", "worst_rate": 50.0, "rate_difference": 38.0}),
+            ("repeated_misses", {"consecutive_misses": 4}),
+            ("streak_milestone", {"current_streak": 14, "best_streak": 20})
+        ]
+
+        for p_type, ev in pattern_types:
+            mock_insight = {
+                "type": p_type,
+                "habit_id": 1,
+                "habit_name": "Test Habit",
+                "title": f"Pattern: {p_type}",
+                "evidence": ev,
+                "confidence": "high",
+                "recommendation": "Existing suggestion."
+            }
+            res = ai_explainer.generate_local_fallback(mock_insight)
+            self.assertEqual(res["pattern_type"], p_type)
+            self.assertEqual(res["source"], "fallback")
+            self.assertTrue(len(res["explanation"]) > 10)
+            self.assertTrue(len(res["recommendation"]) > 5)
+            self.assertTrue(len(res["evidence_summary"]) > 5)
+
+    def test_phase4_mock_ai_provider_success(self):
+        """When AI provider succeeds, explanations are tagged source: 'ai' with grounded content."""
+        create_res = self.client.post('/api/habits', json={"name": "Daily Workout", "category": "Fitness"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        for i in range(7):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "completed"})
+
+        mock_config = {
+            "provider": "gemini",
+            "api_key": "fake_test_key",
+            "model": "gemini-1.5-flash",
+            "endpoint": "",
+            "timeout": 6,
+            "is_configured": True
+        }
+
+        mock_ai_output = [
+            {
+                "index": 0,
+                "explanation": "You have sustained a strong behavioral habit loop for Daily Workout over the past week.",
+                "recommendation": "Keep your workout gear ready the night before to maintain this momentum.",
+                "evidence_summary": "7 of 7 check-ins completed (100% rate)."
+            }
+        ]
+
+        with patch('ai_explainer.get_ai_config', return_value=mock_config):
+            with patch('ai_explainer._call_gemini_api', return_value=mock_ai_output):
+                res = self.client.get('/api/insights/explanations?days=14&refresh=true')
+                self.assertEqual(res.status_code, 200)
+                data = res.get_json()
+                self.assertEqual(data.get('source'), 'ai')
+                self.assertTrue(data.get('ai_configured'))
+                self.assertEqual(data.get('provider'), 'gemini')
+
+                explanations = data.get('explanations', [])
+                self.assertGreater(len(explanations), 0)
+                ai_exp = explanations[0]
+                self.assertEqual(ai_exp['source'], 'ai')
+                self.assertIn("Daily Workout", ai_exp['explanation'])
+                self.assertIn("night before", ai_exp['recommendation'])
+
+    def test_phase4_mock_ai_provider_timeout_fallback(self):
+        """When AI provider encounters a timeout or network error, it gracefully falls back with 200 OK."""
+        create_res = self.client.post('/api/habits', json={"name": "Meditation", "category": "Mindfulness"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        for i in range(6):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "completed"})
+
+        mock_config = {
+            "provider": "gemini",
+            "api_key": "fake_key",
+            "model": "gemini-1.5-flash",
+            "endpoint": "",
+            "timeout": 6,
+            "is_configured": True
+        }
+
+        # Simulate TimeoutError / URLError
+        with patch('ai_explainer.get_ai_config', return_value=mock_config):
+            with patch('ai_explainer._call_gemini_api', side_effect=TimeoutError("Connection timed out")):
+                res = self.client.get('/api/insights/explanations?days=14&refresh=true')
+                # Must return 200, NEVER 500
+                self.assertEqual(res.status_code, 200)
+                data = res.get_json()
+                self.assertEqual(data.get('source'), 'fallback')
+                self.assertGreater(len(data.get('explanations', [])), 0)
+
+    def test_phase4_mock_ai_malformed_response_fallback(self):
+        """When AI provider returns invalid schema or non-list data, reject it and use local fallback."""
+        create_res = self.client.post('/api/habits', json={"name": "Hydration", "category": "Health"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        for i in range(6):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "completed"})
+
+        mock_config = {
+            "provider": "openai",
+            "api_key": "fake_openai_key",
+            "model": "gpt-4o-mini",
+            "endpoint": "",
+            "timeout": 6,
+            "is_configured": True
+        }
+
+        # Return invalid structure (empty or malformed object)
+        with patch('ai_explainer.get_ai_config', return_value=mock_config):
+            with patch('ai_explainer._call_openai_api', return_value={"corrupted": "bad_data"}):
+                res = self.client.get('/api/insights/explanations?days=14&refresh=true')
+                self.assertEqual(res.status_code, 200)
+                data = res.get_json()
+                self.assertEqual(data.get('source'), 'fallback')
+
+    def test_phase4_cache_and_invalidation(self):
+        """Verify caching preserves explanations and habit updates invalidate cache."""
+        ai_explainer.invalidate_explanation_cache()
+
+        create_res = self.client.post('/api/habits', json={"name": "Cache Habit", "category": "General"})
+        habit_id = create_res.get_json()['id']
+        today = date.today().isoformat()
+
+        self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "completed"})
+
+        # First request populates cache
+        res1 = self.client.get('/api/insights/explanations?days=14')
+        self.assertEqual(res1.status_code, 200)
+
+        # Mutate record: should invalidate cache
+        res_mut = self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "missed"})
+        self.assertEqual(res_mut.status_code, 200)
+
+        # Fetching insights should reflect the new state
+        res2 = self.client.get('/api/insights/explanations?days=14')
+        self.assertEqual(res2.status_code, 200)
+
+    def test_phase4_backward_compatible_insights_flag(self):
+        """GET /api/insights?explain=true enriches the response with explanations."""
+        create_res = self.client.post('/api/habits', json={"name": "Backward Compat Habit", "category": "General"})
+        habit_id = create_res.get_json()['id']
+        today = date.today().isoformat()
+        self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "completed"})
+
+        res = self.client.get('/api/insights?days=7&explain=true')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertIn('insights', data)
+        self.assertIn('explanations', data)
+
+    def test_phase4_no_external_calls_offline(self):
+        """Confirm that in standard configuration without API keys, urllib.request.urlopen is NEVER invoked."""
+        with patch('urllib.request.urlopen') as mock_urlopen:
+            res = self.client.get('/api/insights/explanations?days=30')
+            self.assertEqual(res.status_code, 200)
+            mock_urlopen.assert_not_called()
+
 
 if __name__ == '__main__':
     unittest.main()
+

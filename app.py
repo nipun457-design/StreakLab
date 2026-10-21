@@ -17,6 +17,7 @@ import sqlite3
 from datetime import datetime, timedelta, date
 from flask import Flask, render_template, jsonify, request, g
 from pattern_engine import analyze_habit_patterns, analyze_single_habit, get_habit_analytics
+import ai_explainer
 
 # Initialize Flask application
 app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -320,6 +321,7 @@ def create_habit():
         VALUES (?, ?, ?, ?, ?, ?, 1)
     """, (name, description, category, time_of_day, target_time, target_frequency))
     db.commit()
+    ai_explainer.invalidate_explanation_cache()
 
     new_id = cursor.lastrowid
     row = db.execute("SELECT * FROM habits WHERE id = ?", (new_id,)).fetchone()
@@ -378,6 +380,7 @@ def update_habit(habit_id):
         WHERE id = ?
     """, (name, description, category, time_of_day, target_time, target_frequency, active, habit_id))
     db.commit()
+    ai_explainer.invalidate_explanation_cache()
 
     updated = db.execute("SELECT * FROM habits WHERE id = ?", (habit_id,)).fetchone()
     return jsonify(habit_to_dict(updated)), 200
@@ -396,6 +399,7 @@ def deactivate_habit(habit_id):
 
     db.execute("UPDATE habits SET active = 0 WHERE id = ?", (habit_id,))
     db.commit()
+    ai_explainer.invalidate_explanation_cache()
 
     return jsonify({
         "message": "Habit deactivated successfully",
@@ -496,6 +500,7 @@ def save_daily_record():
             (habit_id, record_date)
         )
         db.commit()
+        ai_explainer.invalidate_explanation_cache()
         streak = calculate_streak(habit_id, record_date)
         return jsonify({
             "message": "Record reset to pending",
@@ -514,6 +519,7 @@ def save_daily_record():
             updated_at = CURRENT_TIMESTAMP
     """, (habit_id, record_date, status))
     db.commit()
+    ai_explainer.invalidate_explanation_cache()
 
     row = db.execute(
         "SELECT id, habit_id, record_date, status, created_at, updated_at FROM habit_records WHERE habit_id = ? AND record_date = ?",
@@ -610,7 +616,97 @@ def get_insights():
 
     db = get_db()
     insights_data = analyze_habit_patterns(days=days, target_date_str=target_date, db=db)
+    
+    # Optional explain flag for backward-compatible enriched insights
+    if request.args.get('explain', '').lower() in ('true', '1'):
+        insights_list = insights_data.get("insights", [])
+        insights_data["explanations"] = ai_explainer.explain_patterns(
+            insights_list,
+            period_days=days,
+            target_date=target_date
+        )
+
     return jsonify(insights_data), 200
+
+
+@app.route('/api/insights/explanations', methods=['GET'])
+def get_insight_explanations():
+    """
+    Phase 4: Hybrid AI Explanations and Recommendations.
+    Takes deterministic patterns from pattern_engine and enriches them
+    with evidence-grounded AI explanations or offline deterministic fallbacks.
+
+    Query parameters:
+      - days: integer window (default 30, min 1, max 365)
+      - date: YYYY-MM-DD reference date (defaults to today)
+      - habit_id: optional integer to explain a single habit's patterns
+      - refresh: optional boolean (true/1) to force bypass of cache
+    """
+    days, err = parse_days_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+
+    habit_id_raw = request.args.get('habit_id')
+    habit_id = None
+    if habit_id_raw is not None:
+        try:
+            habit_id = int(habit_id_raw)
+        except (ValueError, TypeError):
+            return jsonify({"error": "habit_id must be a valid integer"}), 400
+
+    refresh = request.args.get('refresh', '').lower() in ('true', '1')
+
+    db = get_db()
+    ai_cfg = ai_explainer.get_ai_config()
+
+    if habit_id is not None:
+        single_data = analyze_single_habit(habit_id=habit_id, days=days, target_date_str=target_date, db=db)
+        if single_data is None:
+            return jsonify({"error": "Habit not found or inactive"}), 404
+
+        habit_insights = single_data.get("insights", [])
+        explanations = ai_explainer.explain_patterns(
+            habit_insights,
+            period_days=days,
+            target_date=target_date,
+            force_refresh=refresh
+        )
+        overall_source = "ai" if any(e.get("source") == "ai" for e in explanations) else "fallback"
+
+        return jsonify({
+            "habit": single_data.get("habit"),
+            "period": single_data.get("period"),
+            "statistics": single_data.get("statistics"),
+            "weekday_breakdown": single_data.get("weekday_breakdown"),
+            "explanations": explanations,
+            "source": overall_source,
+            "ai_configured": ai_cfg["is_configured"],
+            "provider": ai_cfg["provider"] if ai_cfg["is_configured"] else "local_fallback"
+        }), 200
+
+    # Overall system insights with explanations
+    insights_data = analyze_habit_patterns(days=days, target_date_str=target_date, db=db)
+    insights_list = insights_data.get("insights", [])
+
+    explanations = ai_explainer.explain_patterns(
+        insights_list,
+        period_days=days,
+        target_date=target_date,
+        force_refresh=refresh
+    )
+    overall_source = "ai" if any(e.get("source") == "ai" for e in explanations) else "fallback"
+
+    return jsonify({
+        "period": insights_data.get("period"),
+        "summary": insights_data.get("summary"),
+        "explanations": explanations,
+        "source": overall_source,
+        "ai_configured": ai_cfg["is_configured"],
+        "provider": ai_cfg["provider"] if ai_cfg["is_configured"] else "local_fallback"
+    }), 200
 
 
 @app.route('/api/insights/<int:habit_id>', methods=['GET'])

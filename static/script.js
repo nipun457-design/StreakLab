@@ -976,17 +976,18 @@ function escapeHtml(str) {
 }
 
 // ----------------------------------------------------------------------------
-// 10. HABIT PATTERN DETECTOR INSIGHTS (PHASE 3)
+// 10. HABIT PATTERN DETECTOR & AI EXPLANATIONS (PHASE 4: HYBRID AI)
 // ----------------------------------------------------------------------------
 
 /**
- * Loads rule-based habit pattern insights from the Flask API (GET /api/insights).
- * Does not use fabricated insights on error; displays friendly feedback.
+ * Loads pattern explanations from the Flask API (GET /api/insights/explanations).
+ * Fallbacks cleanly to /api/insights if the explanations endpoint is unreachable.
  */
 async function loadInsightsFromApi(days = 30) {
   const container = document.getElementById("insightsContainer");
   const periodSpan = document.getElementById("insightsPeriodSpan");
   const metaSpan = document.getElementById("insightsMetaSpan");
+  const sourceBadge = document.getElementById("insightsSourceBadge");
 
   if (periodSpan) {
     periodSpan.textContent = `Window: ${days} Days`;
@@ -996,14 +997,19 @@ async function loadInsightsFromApi(days = 30) {
     container.innerHTML = `
       <div class="text-center py-4 text-muted small">
         <span class="spinner-border spinner-border-sm text-primary me-2" role="status"></span>
-        <span>Analyzing habit patterns...</span>
+        <span>Analyzing habit patterns with AI explainer...</span>
       </div>
     `;
   }
 
   try {
     const today = getTodayDateString();
-    const response = await fetch(`/api/insights?days=${encodeURIComponent(days)}&date=${encodeURIComponent(today)}`);
+    let response = await fetch(`/api/insights/explanations?days=${encodeURIComponent(days)}&date=${encodeURIComponent(today)}`);
+
+    // Graceful backward compatibility fallback
+    if (!response.ok && response.status === 404) {
+      response = await fetch(`/api/insights?days=${encodeURIComponent(days)}&date=${encodeURIComponent(today)}`);
+    }
 
     if (!response.ok) {
       const err = await response.json().catch(() => ({}));
@@ -1012,6 +1018,7 @@ async function loadInsightsFromApi(days = 30) {
 
     const data = await response.json();
 
+    // Update statistical summary in card footer
     if (metaSpan && data.summary) {
       const s = data.summary;
       metaSpan.innerHTML = `
@@ -1019,10 +1026,24 @@ async function loadInsightsFromApi(days = 30) {
       `;
     }
 
-    renderInsights(data.insights || [], days);
+    // Update source badge in card footer
+    if (sourceBadge) {
+      if (data.source === "ai") {
+        const prov = escapeHtml(data.provider || "AI");
+        sourceBadge.className = "badge bg-purple-subtle text-purple border border-purple-subtle rounded-pill";
+        sourceBadge.innerHTML = `<i class="bi bi-stars me-1"></i>AI (${prov})`;
+      } else {
+        sourceBadge.className = "badge bg-light text-muted border rounded-pill";
+        sourceBadge.innerHTML = `<i class="bi bi-shield-check text-success me-1"></i>Rule Engine`;
+      }
+    }
+
+    // Prioritize explanations array, fallback to insights array
+    const items = data.explanations || data.insights || [];
+    renderInsights(items, days);
 
   } catch (error) {
-    console.error("StreakLab: Could not load insights:", error);
+    console.error("StreakLab: Could not load pattern explanations:", error);
     if (container) {
       container.innerHTML = `
         <div class="alert alert-warning p-3 rounded-3 small mb-0 d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2">
@@ -1040,15 +1061,15 @@ async function loadInsightsFromApi(days = 30) {
 }
 
 /**
- * Renders detected insights into the #insightsContainer element.
- * Distinguishes strong routines, at-risk habits, weekday drop-offs, peak days,
- * time-of-day preferences, repeated misses, and milestone streaks.
+ * Renders detected patterns and evidence-grounded explanations.
+ * Escapes all untrusted text to prevent XSS. Displays source badges,
+ * confidence levels, evidence summaries, and practical recommendations.
  */
-function renderInsights(insightsList, periodDays = 30) {
+function renderInsights(itemsList, periodDays = 30) {
   const container = document.getElementById("insightsContainer");
   if (!container) return;
 
-  if (!Array.isArray(insightsList) || insightsList.length === 0) {
+  if (!Array.isArray(itemsList) || itemsList.length === 0) {
     container.innerHTML = `
       <div class="text-center py-4 text-muted small">
         <i class="bi bi-clipboard-data fs-3 d-block mb-2 text-primary opacity-50"></i>
@@ -1059,7 +1080,7 @@ function renderInsights(insightsList, periodDays = 30) {
     return;
   }
 
-  // Type configuration for icons & borders
+  // Visual type styling map
   const typeIcons = {
     "strong_routine": { icon: "bi-graph-up-arrow text-success", border: "border-success-subtle" },
     "at_risk_habit": { icon: "bi-exclamation-triangle text-danger", border: "border-danger-subtle" },
@@ -1078,14 +1099,28 @@ function renderInsights(insightsList, periodDays = 30) {
     "low": `<span class="badge bg-secondary-subtle text-secondary border border-secondary-subtle rounded-pill small" title="Initial observations">Low Confidence</span>`
   };
 
-  container.innerHTML = insightsList.map(insight => {
-    const config = typeIcons[insight.type] || { icon: "bi-lightbulb-fill text-primary", border: "border" };
-    const confBadge = confidenceBadges[insight.confidence] || confidenceBadges["low"];
+  container.innerHTML = itemsList.map(item => {
+    const pType = item.pattern_type || item.type || "unknown";
+    const config = typeIcons[pType] || { icon: "bi-lightbulb-fill text-primary", border: "border" };
+    const confBadge = confidenceBadges[item.confidence] || confidenceBadges["low"];
 
-    // Format evidence display if available
+    // Source badge: AI vs Rule-based
+    const isAi = (item.source === "ai");
+    const sourceBadge = isAi
+      ? `<span class="badge bg-purple-subtle text-purple border border-purple-subtle rounded-pill small" title="Explained by AI using SQLite evidence"><i class="bi bi-stars me-1"></i>AI</span>`
+      : `<span class="badge bg-light text-muted border rounded-pill small" title="Rule-based deterministic engine"><i class="bi bi-shield-check text-success me-1"></i>Rule</span>`;
+
+    // Supporting Evidence string
     let evidenceHtml = "";
-    if (insight.evidence) {
-      const ev = insight.evidence;
+    if (item.evidence_summary) {
+      evidenceHtml = `
+        <div class="d-flex flex-wrap align-items-center gap-2 mt-2 pt-1 small text-muted">
+          <span class="badge bg-light text-dark border"><i class="bi bi-bar-chart me-1"></i>Evidence:</span>
+          <span>${escapeHtml(item.evidence_summary)}</span>
+        </div>
+      `;
+    } else if (item.evidence) {
+      const ev = item.evidence;
       const bits = [];
       if (typeof ev.completion_rate === "number") bits.push(`Rate: <strong>${ev.completion_rate}%</strong>`);
       if (typeof ev.completed === "number" && typeof ev.missed === "number") bits.push(`${ev.completed} done / ${ev.missed} missed`);
@@ -1103,21 +1138,27 @@ function renderInsights(insightsList, periodDays = 30) {
       }
     }
 
+    const mainText = item.explanation || item.message || "";
+    const recText = item.recommendation || "";
+
     return `
       <div class="insight-item p-3 rounded-3 bg-white border ${config.border} shadow-sm">
-        <div class="d-flex align-items-start justify-content-between gap-2 mb-1">
+        <div class="d-flex align-items-start justify-content-between gap-2 mb-1 flex-wrap">
           <div class="d-flex align-items-center gap-2">
             <i class="bi ${config.icon} fs-5"></i>
-            <h6 class="fw-bold mb-0 text-dark small">${escapeHtml(insight.title)}</h6>
+            <h6 class="fw-bold mb-0 text-dark small">${escapeHtml(item.title || "Habit Pattern")}</h6>
           </div>
-          ${confBadge}
+          <div class="d-flex align-items-center gap-1">
+            ${sourceBadge}
+            ${confBadge}
+          </div>
         </div>
-        <p class="text-muted small mb-0 mt-1">${escapeHtml(insight.message)}</p>
+        <p class="text-muted small mb-0 mt-1">${escapeHtml(mainText)}</p>
         ${evidenceHtml}
-        ${insight.recommendation ? `
+        ${recText ? `
           <div class="mt-2 pt-2 border-top small text-muted">
             <strong class="text-dark"><i class="bi bi-lightbulb text-warning me-1"></i>Recommendation:</strong>
-            ${escapeHtml(insight.recommendation)}
+            ${escapeHtml(recText)}
           </div>
         ` : ""}
       </div>

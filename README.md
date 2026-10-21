@@ -1,8 +1,10 @@
 # 🔥 StreakLab — Habit Pattern Detector
 
-A college project for the **First-Year Applied AI Tools & Prompt Engineering** course.
+A smart habit tracking and behavioral analytics platform for students and developers.
 
-StreakLab is a smart habit tracking web application designed to help students and developers build consistent daily routines, visualize streak momentum, and detect hidden behavioral patterns (such as completion drop-offs on specific weekdays or times of day).
+StreakLab helps you build consistent daily routines, visualize streak momentum, and detect hidden behavioral patterns (such as completion drop-offs on specific weekdays or times of day).
+
+In **Phase 4**, StreakLab introduces a **Hybrid AI Explanation & Recommendation Engine** that pairs deterministic statistical rules with evidence-grounded AI explanations—delivering friendly, personalized coaching while remaining 100% functional offline.
 
 ---
 
@@ -12,7 +14,7 @@ StreakLab is a smart habit tracking web application designed to help students an
 - **Backend (Phase 2A — Complete)**: Python Flask
 - **Database & RESTful APIs (Phase 2B — Complete)**: SQLite (`instance/streaklab.db`), parameterized SQL, foreign-key enforcement, and full CRUD RESTful API endpoints
 - **Habit Pattern Detection Engine (Phase 3 — Complete)**: Rule-based statistical pattern detection (`pattern_engine.py`), dynamic insights generation, analysis window customization, and `/api/insights` + `/api/analytics` endpoints
-- **AI Pattern Detection (Phase 4)**: Python, Pandas, and machine-learning routines
+- **Hybrid AI Explanations & Recommendations (Phase 4 — Complete)**: Grounded AI coaching (`ai_explainer.py`), Gemini and OpenAI-compatible providers, offline deterministic fallback, in-memory caching, and `/api/insights/explanations`
 
 ---
 
@@ -23,162 +25,204 @@ StreakLab/
 │
 ├── app.py                  # Python Flask server + SQLite database initialization & REST API
 ├── pattern_engine.py       # Rule-based statistical pattern detection & analytics engine (Phase 3)
-├── test_app.py             # Automated unit & integration test suite (30 tests)
+├── ai_explainer.py         # Hybrid AI explanation & recommendation engine + local fallback (Phase 4)
+├── test_app.py             # Automated unit & integration test suite (41 tests)
 ├── requirements.txt        # Python dependency manifest (Flask>=3.0.0,<4.0.0)
+├── .env.example            # Environment configuration template for AI providers
 ├── instance/
 │   └── streaklab.db        # SQLite database file (auto-generated, git-ignored)
 ├── templates/
 │   └── index.html          # Main dashboard HTML template (Flask Jinja2)
 ├── static/
 │   ├── style.css           # Custom modern responsive styling
-│   └── script.js           # Frontend client: API fetch calls, pattern insights rendering, Chart.js
+│   └── script.js           # Frontend client: API fetch calls, AI explanation rendering, Chart.js
 ├── README.md               # Beginner-friendly guide and documentation
-└── .gitignore              # Git ignore rules (venv, instance/, __pycache__)
+└── .gitignore              # Git ignore rules (venv, .env, instance/, __pycache__)
 ```
 
 ---
 
-## 🧠 Habit Pattern Detection Engine (Phase 3)
+## 🧠 System Architecture (Phase 4: Hybrid AI)
 
-The pattern detection engine (`pattern_engine.py`) analyzes actual SQLite records to uncover actionable behavioral patterns without relying on hardcoded sample data or external paid APIs.
+```text
+┌──────────────────────┐
+│   SQLite Database    │  (instance/streaklab.db)
+└──────────┬───────────┘
+           │ Parameterized SQL queries
+           ▼
+┌──────────────────────┐
+│    Pattern Engine    │  (pattern_engine.py)
+│  (Source of Truth)   │  • Deterministic statistical calculations
+└──────────┬───────────┘  • Execution rates, streak records, drop-offs
+           │ Structured Evidence & Detected Patterns
+           ▼
+┌──────────────────────┐
+│ Hybrid AI Explainer  │  (ai_explainer.py)
+│  (Evidence-Grounded) │  • Optional AI Provider (Gemini / OpenAI)
+└──────────┬───────────┘  • Deterministic Local Fallback (offline)
+           │              • In-memory cache with auto-invalidation
+           │ Enriched Explanations + Recommendations
+           ▼
+┌──────────────────────┐
+│  Frontend Dashboard  │  (templates/index.html & static/script.js)
+│                      │  • Pattern Cards, Source Badges (AI vs Rule)
+└──────────────────────┘  • XSS-safe rendering, dynamic window filter
+```
 
-### 1. Analysis Window
-- **Configurable Window**: Accepts a `days` query parameter (default: `30` days, valid range: `1` to `365` days).
-- **Date Filtering**: Evaluates records between `start_date` (`end_date - (days - 1)`) and `end_date` (defaults to today).
-- **Future Exclusion**: Records with dates in the future are strictly excluded from historical calculations.
+### Two Distinct Responsibilities
 
-### 2. Completion Rate Definition
-- **Active Execution Rate (Primary Metric)**:
-  $$\text{Completion Rate} = \frac{\text{completed}}{\text{completed} + \text{missed}} \times 100$$
-- **Treatment of Skipped Days**: Skipped check-ins represent excused rest days or planned pauses (e.g., travel, illness, rest schedule). They do **not** penalize the habit completion rate.
-- **Division-by-Zero Guard**: If a habit has only skipped records or zero evaluated check-ins, the rate evaluates safely to `0.0%`.
+1. **Pattern Detection (`pattern_engine.py`)**:
+   - The statistical engine is the **sole source of truth** for all numbers, counts, completion rates, streaks, and detected patterns.
+   - AI is never allowed to invent statistics, fabricate habit records, or replace deterministic calculations with guesses.
 
-### 3. Detection Rules & Thresholds
+2. **AI Explanation (`ai_explainer.py`)**:
+   - The explainer module translates detected patterns into supportive, student-friendly coaching explanations and practical next steps.
+   - Every claim is grounded **strictly in the numerical evidence** supplied by `pattern_engine.py`.
+   - If an AI provider is unconfigured, unreachable, or returns malformed output, the system **automatically and instantly falls back** to deterministic local explanations.
 
-| Pattern Identifier | Name | Detection Rule / Threshold | Practical Recommendation |
-| :--- | :--- | :--- | :--- |
-| `strong_routine` | Strong Routine | Completion rate $\ge 80.0\%$ with $\ge 5$ evaluated check-ins in the window. | Keep as an anchor habit or stack new habits on top of it. |
-| `at_risk_habit` | At-Risk Habit | Completion rate $< 50.0\%$ with $\ge 5$ evaluated check-ins in the window. | Reduce friction: lower target duration or shift time of day. |
-| `weekday_dropoff` | Weekday Drop-off | A weekday with $\ge 3$ records where rate drops $\ge 25\%$ below overall average. | Set reminders or prepare materials the evening before. |
-| `peak_performance_day` | Peak Performance Day | A weekday with $\ge 3$ records where rate is $\ge 20\%$ above average (or $100\%$). | Capitalize on this energy for demanding or high-focus goals. |
-| `time_of_day_preference` | Time-of-Day Window | Compares Morning vs Afternoon vs Evening habits when $\ge 2$ categories have $\ge 5$ records each and rate difference is $\ge 20\%$. | Shift struggling habits into your optimal routine window. |
-| `repeated_misses` | Recent Missed Trend | 3 or more consecutive missed check-ins from the most recent record. | Commit to a 2-minute micro-habit to restart momentum. |
-| `streak_milestone` | Streak Milestone | Active continuous streak $\ge 7$ consecutive days. | Celebrate continuous streak progress and habit loop formation. |
-| `insufficient_data` | Insufficient Data | Fewer than 3 total records across all active habits in the window. | Guidance message encouraging daily check-ins to unlock insights. |
+---
 
-### 4. Qualitative Confidence Levels
-- **`high`**: Substantial sample size ($\ge 14$ observations for habits, $\ge 8$ for weekdays).
-- **`medium`**: Moderate sample size ($7\text{--}13$ observations for habits, $4\text{--}5$ for weekdays).
-- **`low`**: Initial observations ($5\text{--}6$ observations for habits, $3$ for weekdays).
-*Note*: Confidence levels are qualitative sample-size indicators, not probabilistic p-values.
+## ⚙️ AI Provider Configuration
+
+StreakLab supports Google Gemini, OpenAI-compatible providers, or completely offline local fallback without external dependencies.
+
+Configuration is handled through environment variables (or a local `.env` file):
+
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `AI_PROVIDER` | Active AI provider (`gemini`, `openai`, or empty for local fallback) | `gemini` |
+| `AI_API_KEY` | Provider API key (keep private; never commit) | `AIzaSy...` |
+| `AI_MODEL` | Model identifier (defaults: `gemini-1.5-flash`, `gpt-4o-mini`) | `gemini-1.5-flash` |
+| `AI_ENDPOINT` | Optional custom base URL or proxy | `https://custom-proxy.com/v1` |
+| `AI_TIMEOUT` | Request timeout in seconds (default: 6, min: 2, max: 30) | `6` |
+
+### Setting Up a `.env` File (Optional)
+
+Copy `.env.example` to `.env`:
+```powershell
+cp .env.example .env
+```
+
+Edit `.env` with your preferred provider:
+```ini
+AI_PROVIDER=gemini
+AI_API_KEY=your_gemini_api_key_here
+AI_MODEL=gemini-1.5-flash
+AI_TIMEOUT=6
+```
+
+> **Security Note:** `.env` is listed in `.gitignore` and is never committed. If `.env` is omitted or `AI_API_KEY` is blank, StreakLab runs 100% offline using its built-in rule-based fallback.
+
+---
+
+## 🛡️ Guardrails & Safety Controls
+
+1. **Prompt Injection Defense**: User-supplied habit names and descriptions are treated strictly as passive alphanumeric data and are never interpreted as model instructions.
+2. **Zero External Calls on Startup & Tests**: No network requests to AI providers occur during application boot or automated testing.
+3. **No Hallucinated Statistics**: Explanations cite only the provided counts, rates, and sample sizes.
+4. **Constructive & Safe Tone**: The explainer avoids medical or psychological diagnoses, shame, blame, or forceful language.
+5. **Length Limits & XSS Protection**: Explanation and recommendation strings are capped in length and always escaped via `escapeHtml()` before DOM insertion.
+6. **Fault-Tolerant Resilience**: Network drops, timeouts, non-200 responses, or invalid JSON from an AI provider never crash the app or yield a `500 Internal Server Error`; the local fallback returns immediately with HTTP `200 OK`.
+
+---
+
+## ⚡ Deterministic Local Fallback & In-Memory Cache
+
+### Supported Pattern Types in Local Fallback
+
+| Pattern Type | Local Fallback Behavior |
+| :--- | :--- |
+| `no_habits` | Welcoming guide to create the first daily habit. |
+| `insufficient_data` | Clear explanation that at least 3-5 check-ins are required before trends unlock. |
+| `strong_routine` | Factual consistency summary with habit-stacking recommendation. |
+| `at_risk_habit` | Factual friction diagnosis with advice on lowering target duration. |
+| `weekday_dropoff` | Quantified percentage drop on specific weekday with preparation advice. |
+| `peak_performance_day` | Quantified peak completion rate with momentum-capitalizing recommendation. |
+| `time_of_day_preference` | Quantified comparison between Morning, Afternoon, and Evening habits. |
+| `repeated_misses` | Identifies consecutive missed check-ins and suggests a 2-minute micro-habit restart. |
+| `streak_milestone` | Acknowledges continuous multi-day streaks with milestone reinforcement. |
+
+### Caching Strategy
+
+- Explanations are cached in memory using a fingerprint of the evaluation window, target date, and underlying evidence.
+- The cache expires after 5 minutes (TTL).
+- **Auto-Invalidation**: Whenever a habit is created (`POST /api/habits`), updated (`PUT /api/habits/<id>`), archived (`DELETE /api/habits/<id>`), or checked in (`POST /api/records`), the cache is immediately cleared to ensure the UI displays real-time data.
 
 ---
 
 ## 📡 RESTful API Endpoints
 
-### 1. Health Diagnostic
+### 1. Hybrid AI Explanations & Patterns (Phase 4)
+
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `GET` | `/api/health` | Diagnostic check confirming Flask and SQLite connectivity |
+| `GET` | `/api/insights/explanations` | Returns detected patterns with evidence-grounded explanations, recommendations, and source badges |
+| `GET` | `/api/insights/explanations?days=30` | Configurable evaluation window (1 to 365 days) |
+| `GET` | `/api/insights/explanations?habit_id=<id>` | Deep-dive explanations for a specific habit |
+| `GET` | `/api/insights?explain=true` | Backward-compatible endpoint returning raw insights plus explanations |
 
----
-
-### 2. Habits Management
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/habits` | Return all active habits with current streak and today's status |
-| `POST` | `/api/habits` | Create a new habit (`201 Created`) |
-| `GET` | `/api/habits/<id>` | Retrieve a single habit by ID |
-| `PUT` | `/api/habits/<id>` | Update habit fields (name, description, category, target time, etc.) |
-| `DELETE` | `/api/habits/<id>` | Deactivate habit (`active = 0`) preserving historical records |
-
----
-
-### 3. Daily Records Management
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/records?date=YYYY-MM-DD` | Return all habit records for a specific date (defaults to today) |
-| `POST` | `/api/records` | Upsert daily status (`completed`, `missed`, `skipped`, or `pending`) |
-| `GET` | `/api/habits/<id>/records` | Return full chronological record history for a habit |
-
----
-
-### 4. Habit Pattern Detection & Analytics (Phase 3)
-| Method | Endpoint | Description |
-| :--- | :--- | :--- |
-| `GET` | `/api/insights?days=30` | Return overall summary and all detected pattern insights |
-| `GET` | `/api/insights/<id>?days=30` | Return deep-dive stats, weekday breakdown, and patterns for a single habit |
-| `GET` | `/api/analytics?days=30` | Return structured time-series and weekday data for dashboard charts |
-
-#### Example: `GET /api/insights?days=30`
+#### Example: `GET /api/insights/explanations?days=14`
 **Response (`200 OK`)**:
 ```json
 {
   "period": {
-    "days": 30,
-    "start_date": "2026-09-22",
+    "days": 14,
+    "start_date": "2026-10-08",
     "end_date": "2026-10-21"
   },
   "summary": {
     "total_active_habits": 3,
-    "total_records": 24,
-    "total_completed": 19,
-    "total_missed": 3,
-    "total_skipped": 2,
-    "overall_completion_rate": 86.4,
+    "total_records": 21,
+    "total_completed": 18,
+    "total_missed": 2,
+    "total_skipped": 1,
+    "overall_completion_rate": 90.0,
     "best_overall_streak": 8
   },
-  "insights": [
+  "explanations": [
     {
-      "type": "strong_routine",
+      "pattern_type": "strong_routine",
       "habit_id": 1,
-      "habit_name": "30-Min Coding Practice",
-      "title": "Strong Routine: 30-Min Coding Practice",
-      "message": "'30-Min Coding Practice' has an exceptional 90.0% completion rate across 10 evaluated check-ins in the past 30 days.",
-      "evidence": {
-        "completed": 9,
-        "missed": 1,
-        "skipped": 1,
-        "completion_rate": 90.0,
-        "sample_size": 10,
-        "period_days": 30
-      },
+      "habit_name": "Morning Coding",
+      "title": "Strong Routine: Morning Coding",
+      "explanation": "'Morning Coding' shows consistent execution with a 90.0% completion rate across 10 evaluated days in the past 14 days.",
+      "recommendation": "Maintain this strong routine as an anchor habit. You can stack a newer or harder routine immediately after it.",
+      "evidence_summary": "9 completed out of 10 evaluated check-ins (90.0% consistency).",
       "confidence": "medium",
-      "recommendation": "This habit is well-established. Consider keeping it as an anchor routine or stacking a new habit onto it."
+      "source": "fallback"
     }
-  ]
+  ],
+  "source": "fallback",
+  "ai_configured": false,
+  "provider": "local_fallback"
 }
 ```
 
-#### Example: `GET /api/analytics?days=7`
-**Response (`200 OK`)**:
-```json
-{
-  "period": { "days": 7, "start_date": "2026-10-15", "end_date": "2026-10-21" },
-  "summary": {
-    "total_active_habits": 3,
-    "total_completed": 15,
-    "total_missed": 2,
-    "total_skipped": 1,
-    "overall_completion_rate": 88.2
-  },
-  "daily_trend": [
-    { "date": "2026-10-15", "completed": 2, "missed": 0, "skipped": 0, "total": 2, "completion_rate": 100.0 },
-    { "date": "2026-10-16", "completed": 3, "missed": 0, "skipped": 0, "total": 3, "completion_rate": 100.0 }
-  ],
-  "weekday_statistics": [
-    { "day_index": 0, "day_name": "Monday", "completed": 3, "missed": 0, "skipped": 0, "total": 3, "completion_rate": 100.0 }
-  ],
-  "habit_breakdown": [
-    { "id": 1, "name": "30-Min Coding Practice", "category": "Coding", "completed": 6, "missed": 0, "skipped": 1, "completion_rate": 100.0, "best_streak": 6 }
-  ],
-  "time_of_day_distribution": {
-    "Morning": { "completed": 10, "missed": 1, "skipped": 0, "rate": 90.9, "total": 11 },
-    "Afternoon": { "completed": 3, "missed": 1, "skipped": 1, "rate": 75.0, "total": 5 },
-    "Evening": { "completed": 2, "missed": 0, "skipped": 0, "rate": 100.0, "total": 2 }
-  }
-}
-```
+---
+
+### 2. Analytics & Visualizations
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/analytics?days=7` | Daily completion trend, weekday stats, habit breakdown, and time-of-day distribution |
+| `GET` | `/api/insights?days=30` | Statistical pattern detection engine raw insights |
+| `GET` | `/api/insights/<id>?days=30` | Single-habit statistical breakdown |
+
+---
+
+### 3. Habits & Records CRUD
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/habits` | Retrieve all active habits with streaks and today's status |
+| `POST` | `/api/habits` | Create a new habit (`201 Created`) |
+| `GET` | `/api/habits/<id>` | Retrieve a single habit by ID |
+| `PUT` | `/api/habits/<id>` | Update habit fields |
+| `DELETE` | `/api/habits/<id>` | Soft-deactivate habit (`active = 0`) preserving streak history |
+| `GET` | `/api/records?date=YYYY-MM-DD` | Get all records for a date |
+| `POST` | `/api/records` | Upsert daily status (`completed`, `missed`, `skipped`, or `pending`) |
+| `GET` | `/api/habits/<id>/records` | Retrieve full chronological check-in history |
+| `GET` | `/api/health` | Diagnostic check confirming Flask and SQLite status |
 
 ---
 
@@ -189,74 +233,53 @@ The pattern detection engine (`pattern_engine.py`) analyzes actual SQLite record
 cd c:\Users\nipun\OneDrive\Desktop\StreakLab
 ```
 
----
-
-### Step 2: Activate the Virtual Environment
-```powershell
-.\.venv\Scripts\Activate.ps1
-```
-
----
-
-### Step 3: Run the Complete Automated Test Suite
-Run the 30-test automated verification suite:
+### Step 2: Run the Complete Automated Test Suite (41 Tests)
 ```powershell
 .\.venv\Scripts\python.exe test_app.py
 ```
 **Expected Output**:
 ```text
-..............................
+.........................................
 ----------------------------------------------------------------------
-Ran 30 tests in 2.829s
+Ran 41 tests in 1.529s
 
 OK
 ```
 
----
-
-### Step 4: Start the Flask Web Application
+### Step 3: Start the Flask Application
 ```powershell
 .\.venv\Scripts\python.exe app.py
 ```
-**Expected Console Output**:
+**Console Output**:
 ```text
 ============================================================
-[*] Starting StreakLab Flask Backend with SQLite (Phase 2B)...
+[*] Starting StreakLab Flask Backend with SQLite (Phase 4)...
 [*] Database Path : C:\Users\nipun\OneDrive\Desktop\StreakLab\instance\streaklab.db
 [*] Dashboard URL  : http://127.0.0.1:5000
 [*] Health API    : http://127.0.0.1:5000/api/health
 [*] Habits API    : http://127.0.0.1:5000/api/habits
+[*] Insights API  : http://127.0.0.1:5000/api/insights/explanations
 ============================================================
  * Serving Flask app 'app'
  * Debug mode: on
  * Running on http://127.0.0.1:5000
 ```
 
----
-
-### Step 5: Verify the Dashboard in Your Browser
-1. Open **`http://127.0.0.1:5000`** in Chrome, Edge, or Firefox.
-2. Check that the top navbar shows the **Phase 3 • Pattern Engine** badge.
-3. In the right column under **Habit Pattern Detector**:
-   - Use the window selector to toggle between **Last 7 Days**, **Last 14 Days**, **Last 30 Days**, **Last 60 Days**, and **Last 90 Days**.
-   - Notice the dynamic pattern cards showing detected routines, evidence metrics, confidence pills, and practical recommendations.
-4. Mark a habit as completed or missed; observe the insights and charts dynamically refreshing.
-
----
-
-## ⚠️ Known Limitations of the Rule-Based Approach
-
-1. **Cold Start Period**: The engine requires at least 3 check-ins before generating insights to prevent false-positive conclusions from tiny sample sizes.
-2. **Correlation vs Causation**: Weekday and time-of-day patterns indicate observed correlations, not causal relationships (e.g., lower Sunday completion might stem from travel or different wake-up times).
-3. **Discrete Categorization**: Time-of-day analysis groups habits by their scheduled category (`Morning`, `Afternoon`, `Evening`) rather than precise execution timestamps.
-4. **Binary Daily Status**: Statuses are modeled as `completed`, `missed`, or `skipped`; partial completions (e.g., 15 mins of a 30-min goal) are not yet represented.
+### Step 4: Explore the Dashboard in Your Browser
+1. Open **`http://127.0.0.1:5000`** in any browser.
+2. Look at the **Habit Pattern Detector** card on the right:
+   - Notice the **Phase 4 • Hybrid AI Explanations** badge.
+   - The footer displays whether explanations are sourced from **AI** or the **Rule Engine**.
+   - Each card displays the pattern title, explanation, supporting evidence box, confidence pill, and recommendation.
+   - Use the window dropdown (**7**, **14**, **30**, **60**, **90** days) to analyze different time horizons.
+3. Check in habits (Done, Missed, Skipped) and watch the charts and pattern explanations update in real time.
 
 ---
 
-## 📅 Development Roadmap
+## 📅 Development Roadmap Status
 
-- [x] **Phase 1**: Frontend dashboard with interactive UI, filters, and Chart.js.
-- [x] **Phase 2A**: Flask backend foundation, static asset serving via `url_for`, and `/api/health` endpoint.
-- [x] **Phase 2B**: SQLite database integration (`instance/streaklab.db`), RESTful API endpoints for habits and daily records, database-backed streaks, and frontend API connection.
-- [x] **Phase 3**: Rule-based habit pattern detection engine (`pattern_engine.py`), `/api/insights`, `/api/insights/<id>`, `/api/analytics`, configurable analysis window, and dynamic dashboard integration.
-- [ ] **Phase 4**: Advanced machine-learning habit pattern detection and routine optimization.
+- [x] **Phase 1**: Interactive HTML5, CSS3, JavaScript dashboard with Chart.js and filters.
+- [x] **Phase 2A**: Flask backend foundation and `/api/health` endpoint.
+- [x] **Phase 2B**: SQLite database integration (`instance/streaklab.db`), RESTful API endpoints, streak calculation, and frontend API wiring.
+- [x] **Phase 3**: Rule-based habit pattern detection engine (`pattern_engine.py`), `/api/insights`, `/api/analytics`, configurable window selector, and statistical metrics.
+- [x] **Phase 4**: Hybrid AI explanation and recommendation engine (`ai_explainer.py`), Gemini and OpenAI integrations, local deterministic fallback, in-memory cache with mutation invalidation, `/api/insights/explanations`, and automated test suite.
