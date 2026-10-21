@@ -1,0 +1,5 @@
+# StreakLab — Habit Pattern Detector Dependencies
+# Phase 2A: Flask Backend Foundation
+
+# Flask is a lightweight WSGI web application framework for Python
+Flask>=3.0.0,<4.0.0

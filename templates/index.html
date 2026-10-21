@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>StreakLab — Habit Pattern Detector</title>
+  <meta name="description" content="StreakLab is a smart habit tracking web dashboard with pattern detection insights, streak indicators, and weekly progress charts.">
+
+  <!-- Google Fonts: Inter for clean, modern readability -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet">
+
+  <!-- Bootstrap 5 CSS -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  
+  <!-- Bootstrap Icons -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+
+  <!-- Custom Stylesheet served via Flask's static folder -->
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+
+  <!-- ================================================================= -->
+  <!-- TOP NAVIGATION BAR                                                -->
+  <!-- ================================================================= -->
+  <nav class="navbar navbar-expand-lg border-bottom sticky-top bg-surface py-3">
+    <div class="container-fluid px-lg-4">
+      <!-- Brand Logo & Badge -->
+      <a class="navbar-brand d-flex align-items-center gap-2 m-0" href="#">
+        <div class="brand-icon-wrapper">
+          <i class="bi bi-fire text-white"></i>
+        </div>
+        <div class="d-flex flex-column">
+          <span class="brand-text">Streak<span class="brand-text-accent">Lab</span></span>
+          <span class="brand-subtext">Habit Pattern Detector</span>
+        </div>
+        <span class="badge bg-indigo-subtle text-indigo border border-indigo-subtle ms-2 rounded-pill d-none d-sm-inline-block">Phase 2B • SQLite Powered</span>
+      </a>
+
+      <!-- Navbar Right Controls -->
+      <div class="d-flex align-items-center gap-2 gap-sm-3 ms-auto">
+        <!-- Live Date Display -->
+        <div class="date-chip d-none d-md-flex align-items-center gap-2">
+          <i class="bi bi-calendar3 text-muted"></i>
+          <span id="currentDateDisplay" class="fw-medium small">Loading date...</span>
+        </div>
+
+        <!-- Add Habit Trigger Button (Opens Modal) -->
+        <button type="button" class="btn btn-primary d-flex align-items-center gap-2 shadow-sm rounded-pill px-3 py-2" data-bs-toggle="modal" data-bs-target="#addHabitModal" id="btnOpenAddHabit">
+          <i class="bi bi-plus-circle-fill"></i>
+          <span class="fw-semibold">Add Habit</span>
+        </button>
+      </div>
+    </div>
+  </nav>
+
+  <!-- ================================================================= -->
+  <!-- MAIN DASHBOARD CONTAINER                                          -->
+  <!-- ================================================================= -->
+  <main class="container-fluid px-lg-4 py-4">
+
+    <!-- WELCOME & DAILY PROGRESS BANNER -->
+    <section class="welcome-banner p-4 rounded-4 mb-4 position-relative overflow-hidden">
+      <div class="row align-items-center gy-3">
+        <div class="col-lg-7">
+          <div class="d-inline-flex align-items-center gap-2 px-3 py-1 rounded-pill bg-white/20 text-white small mb-2 backdrop-blur">
+            <i class="bi bi-stars"></i>
+            <span>Applied AI Tools & Prompt Engineering Project</span>
+          </div>
+          <h1 class="welcome-title text-white fw-bold mb-2">Welcome back, Nipun! 👋</h1>
+          <p class="welcome-desc text-white-50 mb-0">
+            Keep your momentum alive. Consistent daily actions form powerful neural patterns.
+          </p>
+        </div>
+
+        <!-- Today's Completion Score Card -->
+        <div class="col-lg-5">
+          <div class="banner-stat-box p-3 rounded-3 text-white">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <span class="small text-white-75 fw-medium">Today's Progress</span>
+              <span id="bannerProgressLabel" class="fw-bold">0 of 0 Completed (0%)</span>
+            </div>
+            <div class="progress banner-progress" role="progressbar" aria-label="Today completion progress" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100">
+              <div id="bannerProgressBar" class="progress-bar bg-white text-dark fw-bold" style="width: 0%"></div>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-2 pt-1 text-white-75 small">
+              <i class="bi bi-lightning-charge-fill text-warning"></i>
+              <span id="bannerMotivationText">Complete 1 more habit to boost today's score!</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- 4 SUMMARY METRIC CARDS                                            -->
+    <!-- ================================================================= -->
+    <section class="row g-3 mb-4" id="summaryCardsSection">
+      <!-- Card 1: Best Current Streak -->
+      <div class="col-6 col-xl-3">
+        <div class="card metric-card border-0 shadow-sm h-100">
+          <div class="card-body p-3 p-md-4">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <p class="metric-label text-muted mb-1 small fw-medium">Best Streak</p>
+                <h3 id="statBestStreak" class="metric-value fw-bold mb-1">0 Days</h3>
+                <span class="badge bg-warning-subtle text-warning-emphasis rounded-pill small">
+                  <i class="bi bi-fire me-1"></i>Active Streak
+                </span>
+              </div>
+              <div class="metric-icon-box bg-orange-subtle text-orange">
+                <i class="bi bi-fire"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 2: Today's Completion Rate -->
+      <div class="col-6 col-xl-3">
+        <div class="card metric-card border-0 shadow-sm h-100">
+          <div class="card-body p-3 p-md-4">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <p class="metric-label text-muted mb-1 small fw-medium">Completion Rate</p>
+                <h3 id="statCompletionRate" class="metric-value fw-bold mb-1">0%</h3>
+                <span id="statCompletionBadge" class="badge bg-success-subtle text-success rounded-pill small">
+                  <i class="bi bi-arrow-up-right me-1"></i>Today's Pace
+                </span>
+              </div>
+              <div class="metric-icon-box bg-emerald-subtle text-emerald">
+                <i class="bi bi-check2-circle"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 3: Active Habits Tracked -->
+      <div class="col-6 col-xl-3">
+        <div class="card metric-card border-0 shadow-sm h-100">
+          <div class="card-body p-3 p-md-4">
+            <div class="d-flex justify-content-between align-items-start">
+              <div>
+                <p class="metric-label text-muted mb-1 small fw-medium">Active Habits</p>
+                <h3 id="statActiveHabits" class="metric-value fw-bold mb-1">0</h3>
+                <span class="badge bg-primary-subtle text-primary rounded-pill small">
+                  <i class="bi bi-collection me-1"></i>Tracked Daily
+                </span>
+              </div>
+              <div class="metric-icon-box bg-primary-subtle text-primary">
+                <i class="bi bi-grid-fill"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card 4: Top Consistent Habit -->
+      <div class="col-6 col-xl-3">
+        <div class="card metric-card border-0 shadow-sm h-100">
+          <div class="card-body p-3 p-md-4">
+            <div class="d-flex justify-content-between align-items-start">
+              <div class="overflow-hidden">
+                <p class="metric-label text-muted mb-1 small fw-medium">Strongest Habit</p>
+                <h3 id="statStrongestHabit" class="metric-value fw-bold mb-1 text-truncate" title="Top habit">--</h3>
+                <span id="statStrongestStreak" class="badge bg-purple-subtle text-purple rounded-pill small">
+                  <i class="bi bi-trophy-fill me-1"></i>Top Performer
+                </span>
+              </div>
+              <div class="metric-icon-box bg-purple-subtle text-purple">
+                <i class="bi bi-trophy"></i>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================================================================= -->
+    <!-- MAIN CONTENT ROW: HABITS (LEFT) & ANALYTICS CHARTS (RIGHT)       -->
+    <!-- ================================================================= -->
+    <div class="row g-4">
+      
+      <!-- LEFT COLUMN: TODAY'S HABITS LIST & CONTROLS -->
+      <div class="col-12 col-xl-7">
+        <div class="card border-0 shadow-sm rounded-4 habits-section-card">
+          <div class="card-header bg-transparent border-0 pt-4 px-4 pb-2">
+            <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-3">
+              <div>
+                <h2 class="h5 fw-bold mb-1 d-flex align-items-center gap-2">
+                  <i class="bi bi-check-all text-primary"></i>
+                  Today's Habits
+                </h2>
+                <p class="text-muted small mb-0">Mark each habit as completed, missed, or skipped.</p>
+              </div>
+
+              <!-- Quick Time-of-Day Filter Pills -->
+              <div class="btn-group btn-group-sm filter-pill-group" role="group" aria-label="Habit filters">
+                <button type="button" class="btn btn-outline-secondary active filter-btn" data-filter="all">All</button>
+                <button type="button" class="btn btn-outline-secondary filter-btn" data-filter="Morning">Morning</button>
+                <button type="button" class="btn btn-outline-secondary filter-btn" data-filter="Afternoon">Afternoon</button>
+                <button type="button" class="btn btn-outline-secondary filter-btn" data-filter="Evening">Evening</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card-body px-4 py-3">
+            <!-- Habit Status Legend / Guide for beginner clarity -->
+            <div class="status-legend-bar d-flex flex-wrap align-items-center gap-3 p-2 px-3 rounded-3 bg-light mb-3 small text-muted">
+              <span class="fw-semibold text-dark">Actions:</span>
+              <span class="d-inline-flex align-items-center gap-1">
+                <span class="legend-dot bg-success"></span> Done
+              </span>
+              <span class="d-inline-flex align-items-center gap-1">
+                <span class="legend-dot bg-danger"></span> Missed
+              </span>
+              <span class="d-inline-flex align-items-center gap-1">
+                <span class="legend-dot bg-warning"></span> Skipped
+              </span>
+              <span class="ms-auto text-muted fst-italic d-none d-md-inline">Click any status button to change state</span>
+            </div>
+
+            <!-- Optional Migration or API Alert Notice -->
+            <div id="dashboardAlertContainer" class="mb-3"></div>
+
+            <!-- Dynamic Habits List Container -->
+            <div id="habitsListContainer" class="d-flex flex-column gap-3">
+              <!-- Habit cards rendered dynamically by static/script.js -->
+            </div>
+
+            <!-- Empty State (Shown when no habits match filter or list is empty) -->
+            <div id="emptyHabitsState" class="empty-state text-center py-5 d-none">
+              <div class="empty-icon-circle mx-auto mb-3">
+                <i class="bi bi-calendar-plus text-primary fs-3"></i>
+              </div>
+              <h5 class="fw-bold mb-1">No Habits Found</h5>
+              <p class="text-muted small mb-3">There are no habits matching this filter right now.</p>
+              <button class="btn btn-sm btn-outline-primary rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#addHabitModal">
+                <i class="bi bi-plus-lg me-1"></i>Create a Habit
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT COLUMN: PROGRESS CHARTS & AI PATTERN PREVIEW -->
+      <div class="col-12 col-xl-5">
+        <div class="d-flex flex-column gap-4">
+
+          <!-- CARD 1: WEEKLY PROGRESS CHART -->
+          <div class="card border-0 shadow-sm rounded-4">
+            <div class="card-header bg-transparent border-0 pt-4 px-4 pb-0 d-flex justify-content-between align-items-center">
+              <div>
+                <h3 class="h6 fw-bold mb-1 d-flex align-items-center gap-2">
+                  <i class="bi bi-bar-chart-line-fill text-primary"></i>
+                  Weekly Consistency
+                </h3>
+                <p class="text-muted small mb-0">Daily completed habits for the past 7 days</p>
+              </div>
+              <span class="badge bg-light text-dark border px-2 py-1 rounded-pill small">Mon – Sun</span>
+            </div>
+            <div class="card-body px-4 pb-4 pt-2">
+              <div class="chart-container" style="position: relative; height: 180px;">
+                <canvas id="weeklyChart"></canvas>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 2: TIME OF DAY BREAKDOWN CHART -->
+          <div class="card border-0 shadow-sm rounded-4">
+            <div class="card-header bg-transparent border-0 pt-4 px-4 pb-0 d-flex justify-content-between align-items-center">
+              <div>
+                <h3 class="h6 fw-bold mb-1 d-flex align-items-center gap-2">
+                  <i class="bi bi-pie-chart-fill text-indigo"></i>
+                  Habit Distribution by Time
+                </h3>
+                <p class="text-muted small mb-0">Morning vs Afternoon vs Evening habits</p>
+              </div>
+            </div>
+            <div class="card-body px-4 pb-4 pt-2">
+              <div class="row align-items-center">
+                <div class="col-6">
+                  <div class="chart-container" style="position: relative; height: 160px;">
+                    <canvas id="timeOfDayChart"></canvas>
+                  </div>
+                </div>
+                <div class="col-6">
+                  <div class="d-flex flex-column gap-2 small" id="timeDistributionLegend">
+                    <div class="d-flex align-items-center justify-content-between">
+                      <span class="d-flex align-items-center gap-2">
+                        <span class="legend-color-box bg-morning"></span> Morning
+                      </span>
+                      <span id="morningCountBadge" class="fw-bold">0</span>
+                    </div>
+                    <div class="d-flex align-items-center justify-content-between">
+                      <span class="d-flex align-items-center gap-2">
+                        <span class="legend-color-box bg-afternoon"></span> Afternoon
+                      </span>
+                      <span id="afternoonCountBadge" class="fw-bold">0</span>
+                    </div>
+                    <div class="d-flex align-items-center justify-content-between">
+                      <span class="d-flex align-items-center gap-2">
+                        <span class="legend-color-box bg-evening"></span> Evening
+                      </span>
+                      <span id="eveningCountBadge" class="fw-bold">0</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- CARD 3: AI PATTERN DETECTOR PREVIEW (PHASE 4 TEASER) -->
+          <div class="card border-0 shadow-sm rounded-4 ai-insight-card">
+            <div class="card-body p-4">
+              <div class="d-flex align-items-center gap-2 mb-3">
+                <div class="ai-badge-icon">
+                  <i class="bi bi-cpu-fill text-white"></i>
+                </div>
+                <div>
+                  <h4 class="h6 fw-bold mb-0 text-dark">AI Habit Pattern Detector</h4>
+                  <span class="badge bg-purple-subtle text-purple border border-purple-subtle rounded-pill small">
+                    Phase 4 Statistical Preview
+                  </span>
+                </div>
+              </div>
+
+              <div class="d-flex flex-column gap-3">
+                <div class="insight-item p-3 rounded-3 bg-white border">
+                  <div class="d-flex align-items-start gap-2">
+                    <i class="bi bi-graph-up-arrow text-success fs-5 mt-1"></i>
+                    <div>
+                      <p class="fw-semibold mb-0 small text-dark">Optimal Routine Window</p>
+                      <p class="text-muted small mb-0">
+                        Morning habits show an <strong class="text-success">85% higher completion rate</strong> than evening habits.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="insight-item p-3 rounded-3 bg-white border">
+                  <div class="d-flex align-items-start gap-2">
+                    <i class="bi bi-exclamation-triangle text-warning fs-5 mt-1"></i>
+                    <div>
+                      <p class="fw-semibold mb-0 small text-dark">Weekend Drop-off Notice</p>
+                      <p class="text-muted small mb-0">
+                        Habits scheduled on Sundays have a <strong class="text-warning-emphasis">35% drop</strong>. Consider setting a reminder 15 min earlier.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="mt-3 pt-2 border-top text-center">
+                <span class="text-muted small">
+                  <i class="bi bi-info-circle me-1"></i>
+                  Python & Pandas statistical engine will be integrated in Phase 4.
+                </span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- ================================================================= -->
+  <!-- MODAL: ADD NEW HABIT                                              -->
+  <!-- ================================================================= -->
+  <div class="modal fade" id="addHabitModal" tabindex="-1" aria-labelledby="addHabitModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        
+        <div class="modal-header border-0 pb-0 pt-4 px-4">
+          <div class="d-flex align-items-center gap-2">
+            <div class="modal-header-icon bg-primary-subtle text-primary">
+              <i class="bi bi-plus-lg"></i>
+            </div>
+            <div>
+              <h5 class="modal-title fw-bold" id="addHabitModalLabel">Add New Habit</h5>
+              <p class="text-muted small mb-0">Set up a daily habit and build your streak.</p>
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <form id="addHabitForm" novalidate>
+          <div class="modal-body px-4 py-3">
+            <!-- Habit Title -->
+            <div class="mb-3">
+              <label for="habitNameInput" class="form-label fw-semibold small">Habit Name <span class="text-danger">*</span></label>
+              <div class="input-group">
+                <span class="input-group-text bg-light border-end-0"><i class="bi bi-pencil-fill text-muted"></i></span>
+                <input type="text" class="form-control border-start-0 ps-0" id="habitNameInput" placeholder="e.g. 30 Min Coding Practice" required>
+              </div>
+              <div class="invalid-feedback">Please enter a habit name.</div>
+            </div>
+
+            <!-- Optional Habit Description -->
+            <div class="mb-3">
+              <label for="habitDescriptionInput" class="form-label fw-semibold small">Description <span class="text-muted">(Optional)</span></label>
+              <input type="text" class="form-control" id="habitDescriptionInput" placeholder="e.g. Focus on fundamentals & exercises">
+            </div>
+
+            <!-- Category & Time of Day in 2 Columns -->
+            <div class="row g-3 mb-3">
+              <div class="col-sm-6">
+                <label for="habitCategorySelect" class="form-label fw-semibold small">Category</label>
+                <select class="form-select" id="habitCategorySelect">
+                  <option value="Coding" selected>💻 Coding & Tech</option>
+                  <option value="Fitness">🏃 Health & Fitness</option>
+                  <option value="Learning">📚 Study & Learning</option>
+                  <option value="Mindfulness">🧘 Mindfulness</option>
+                  <option value="Health">💧 Health & Wellness</option>
+                  <option value="Productivity">⚡ Productivity</option>
+                </select>
+              </div>
+
+              <div class="col-sm-6">
+                <label for="habitTimeOfDaySelect" class="form-label fw-semibold small">Time of Day</label>
+                <select class="form-select" id="habitTimeOfDaySelect">
+                  <option value="Morning" selected>🌅 Morning (6 AM - 12 PM)</option>
+                  <option value="Afternoon">☀️ Afternoon (12 PM - 5 PM)</option>
+                  <option value="Evening">🌙 Evening (5 PM - 11 PM)</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Frequency & Scheduled Target Time -->
+            <div class="row g-3 mb-2">
+              <div class="col-sm-6">
+                <label for="habitFrequencySelect" class="form-label fw-semibold small">Frequency</label>
+                <select class="form-select" id="habitFrequencySelect">
+                  <option value="Daily" selected>Every Day</option>
+                  <option value="Weekdays">Mon – Fri (Weekdays)</option>
+                  <option value="Weekends">Sat – Sun (Weekends)</option>
+                </select>
+              </div>
+
+              <div class="col-sm-6">
+                <label for="habitTargetTimeInput" class="form-label fw-semibold small">Target Time</label>
+                <input type="time" class="form-control" id="habitTargetTimeInput" value="08:00">
+              </div>
+            </div>
+          </div>
+
+          <div class="modal-footer border-0 px-4 pb-4 pt-2">
+            <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary rounded-pill px-4 d-flex align-items-center gap-2">
+              <i class="bi bi-check-lg"></i>
+              Save Habit
+            </button>
+          </div>
+        </form>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- TOAST NOTIFICATION CONTAINER (FOR ACTIONS & CONFIRMATIONS)        -->
+  <!-- ================================================================= -->
+  <div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1090;">
+    <div id="actionToast" class="toast align-items-center text-bg-dark border-0 shadow-lg rounded-3" role="alert" aria-live="assertive" aria-atomic="true">
+      <div class="d-flex">
+        <div class="toast-body d-flex align-items-center gap-2">
+          <i id="toastIcon" class="bi bi-check-circle-fill text-success fs-5"></i>
+          <span id="toastMessage">Habit status updated!</span>
+        </div>
+        <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast" aria-label="Close"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- SCRIPTS: Bootstrap JS, Chart.js, and Custom App Logic             -->
+  <!-- ================================================================= -->
+  <!-- Bootstrap 5.3 Bundle with Popper -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+
+  <!-- Chart.js 4.4 CDN for interactive graphs -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+
+  <!-- Custom JavaScript served via Flask's static folder -->
+  <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

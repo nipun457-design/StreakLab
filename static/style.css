@@ -1,0 +1,522 @@
+/* ==========================================================================
+   StreakLab — Habit Pattern Detector
+   Stylesheet: static/style.css
+   Designed for clean, modern, responsive aesthetics (Desktop & Mobile)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. CSS VARIABLES (DESIGN SYSTEM TOKENS)
+   -------------------------------------------------------------------------- */
+:root {
+  /* Brand Palette */
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-subtle: #eef2ff;
+  --primary-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%);
+  --brand-gradient: linear-gradient(135deg, #2563eb 0%, #4f46e5 50%, #9333ea 100%);
+  
+  /* Status Colors */
+  --emerald: #10b981;
+  --emerald-subtle: #ecfdf5;
+  --orange: #f97316;
+  --orange-subtle: #fff7ed;
+  --rose: #ef4444;
+  --rose-subtle: #fef2f2;
+  --amber: #f59e0b;
+  --amber-subtle: #fffbeb;
+  --purple: #8b5cf6;
+  --purple-subtle: #f5f3ff;
+
+  /* Surfaces & Backgrounds */
+  --bg-body: #f8fafc;
+  --surface-card: #ffffff;
+  --surface-border: #e2e8f0;
+  --text-main: #0f172a;
+  --text-muted: #64748b;
+
+  /* Time of Day Themes */
+  --morning-color: #f59e0b;
+  --afternoon-color: #3b82f6;
+  --evening-color: #8b5cf6;
+
+  /* Transitions & Radii */
+  --radius-card: 16px;
+  --transition-fast: all 0.2s ease-in-out;
+  --transition-smooth: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
+  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08);
+  --shadow-hover: 0 10px 25px -4px rgba(79, 70, 229, 0.12);
+}
+
+/* --------------------------------------------------------------------------
+   2. GLOBAL RESETS & TYPOGRAPHY
+   -------------------------------------------------------------------------- */
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background-color: var(--bg-body);
+  color: var(--text-main);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4, .brand-text {
+  font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+  letter-spacing: -0.02em;
+}
+
+/* --------------------------------------------------------------------------
+   3. NAVIGATION BAR
+   -------------------------------------------------------------------------- */
+.bg-surface {
+  background-color: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--surface-border) !important;
+}
+
+.brand-icon-wrapper {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  background: var(--brand-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.3);
+  font-size: 1.25rem;
+}
+
+.brand-text {
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: var(--text-main);
+}
+
+.brand-text-accent {
+  background: var(--brand-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.brand-subtext {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.date-chip {
+  background-color: #f1f5f9;
+  padding: 6px 14px;
+  border-radius: 20px;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+}
+
+/* Custom Color Utility Classes */
+.bg-indigo-subtle { background-color: var(--primary-subtle); }
+.text-indigo { color: var(--primary); }
+.border-indigo-subtle { border-color: #c7d2fe; }
+
+.bg-orange-subtle { background-color: var(--orange-subtle); }
+.text-orange { color: var(--orange); }
+
+.bg-emerald-subtle { background-color: var(--emerald-subtle); }
+.text-emerald { color: var(--emerald); }
+
+.bg-purple-subtle { background-color: var(--purple-subtle); }
+.text-purple { color: var(--purple); }
+.border-purple-subtle { border-color: #ddd6fe; }
+
+/* --------------------------------------------------------------------------
+   4. WELCOME BANNER & HERO PROGRESS
+   -------------------------------------------------------------------------- */
+.welcome-banner {
+  background: var(--brand-gradient);
+  box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.35);
+}
+
+.welcome-title {
+  font-size: 1.75rem;
+  letter-spacing: -0.03em;
+}
+
+.welcome-desc {
+  font-size: 0.95rem;
+  max-width: 580px;
+  line-height: 1.5;
+}
+
+.backdrop-blur {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+
+.bg-white\/20 {
+  background-color: rgba(255, 255, 255, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+}
+
+.banner-stat-box {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  backdrop-filter: blur(10px);
+}
+
+.banner-progress {
+  height: 10px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.25);
+}
+
+.banner-progress .progress-bar {
+  border-radius: 10px;
+  transition: width 0.5s ease-in-out;
+}
+
+/* --------------------------------------------------------------------------
+   5. SUMMARY KPI CARDS
+   -------------------------------------------------------------------------- */
+.metric-card {
+  border-radius: var(--radius-card);
+  background: var(--surface-card);
+  transition: var(--transition-smooth);
+  border: 1px solid var(--surface-border) !important;
+}
+
+.metric-card:hover {
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-hover) !important;
+}
+
+.metric-label {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.metric-value {
+  font-size: 1.6rem;
+  color: var(--text-main);
+  letter-spacing: -0.03em;
+}
+
+.metric-icon-box {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25rem;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   6. TODAY'S HABITS SECTION & CARDS
+   -------------------------------------------------------------------------- */
+.habits-section-card {
+  border: 1px solid var(--surface-border) !important;
+}
+
+/* Filter Buttons */
+.filter-pill-group .filter-btn {
+  border-radius: 20px;
+  padding: 5px 14px;
+  font-weight: 500;
+  border-color: #e2e8f0;
+  color: #475569;
+}
+
+.filter-pill-group .filter-btn:hover {
+  background-color: #f1f5f9;
+  color: var(--text-main);
+}
+
+.filter-pill-group .filter-btn.active {
+  background-color: var(--primary) !important;
+  border-color: var(--primary) !important;
+  color: #ffffff !important;
+}
+
+/* Habit Card Item */
+.habit-card {
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  border-radius: 14px;
+  padding: 16px;
+  transition: var(--transition-smooth);
+  position: relative;
+}
+
+.habit-card:hover {
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+/* Habit Card States */
+.habit-card.status-completed {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+.habit-card.status-completed .habit-name {
+  color: #166534;
+}
+
+.habit-card.status-missed {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.habit-card.status-missed .habit-name {
+  color: #991b1b;
+}
+
+.habit-card.status-skipped {
+  border-color: #fde68a;
+  background: #fffbeb;
+}
+
+.habit-card.status-skipped .habit-name {
+  color: #92400e;
+}
+
+/* Habit Category Icon Pill */
+.habit-cat-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+/* Habit Name and Metadata */
+.habit-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin-bottom: 2px;
+}
+
+.streak-badge {
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 12px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Status Action Buttons */
+.action-btn-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn-status {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid #e2e8f0;
+  background-color: #ffffff;
+  color: #64748b;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  padding: 0;
+}
+
+.btn-status:hover {
+  transform: scale(1.1);
+}
+
+/* Completed Button */
+.btn-status-done:hover,
+.habit-card.status-completed .btn-status-done {
+  background-color: var(--emerald);
+  border-color: var(--emerald);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+}
+
+/* Missed Button */
+.btn-status-missed:hover,
+.habit-card.status-missed .btn-status-missed {
+  background-color: var(--rose);
+  border-color: var(--rose);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.35);
+}
+
+/* Skipped Button */
+.btn-status-skipped:hover,
+.habit-card.status-skipped .btn-status-skipped {
+  background-color: var(--amber);
+  border-color: var(--amber);
+  color: #ffffff;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
+}
+
+/* Habit Options dropdown / delete */
+.btn-delete-habit {
+  color: #94a3b8;
+  border: none;
+  background: transparent;
+  padding: 4px 6px;
+  border-radius: 6px;
+  transition: var(--transition-fast);
+}
+
+.btn-delete-habit:hover {
+  color: var(--rose);
+  background-color: #fee2e2;
+}
+
+/* 7-Day Mini History Dots */
+.mini-history-dots {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.history-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background-color: #e2e8f0;
+  display: inline-block;
+  transition: var(--transition-fast);
+}
+
+.history-dot.dot-done {
+  background-color: var(--emerald);
+}
+
+.history-dot.dot-missed {
+  background-color: var(--rose);
+}
+
+.history-dot.dot-skipped {
+  background-color: var(--amber);
+}
+
+/* Legend items */
+.legend-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+/* Empty State Box */
+.empty-icon-circle {
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background-color: var(--primary-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* --------------------------------------------------------------------------
+   7. RIGHT COLUMN CHARTS & AI PREVIEW
+   -------------------------------------------------------------------------- */
+.bg-morning { background-color: var(--morning-color); }
+.bg-afternoon { background-color: var(--afternoon-color); }
+.bg-evening { background-color: var(--evening-color); }
+
+.legend-color-box {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.ai-insight-card {
+  background: linear-gradient(135deg, #fdf4ff 0%, #f5f3ff 50%, #eff6ff 100%);
+  border: 1px solid #ddd6fe !important;
+}
+
+.ai-badge-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: var(--brand-gradient);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.insight-item {
+  transition: var(--transition-fast);
+}
+
+.insight-item:hover {
+  transform: translateX(3px);
+  box-shadow: var(--shadow-sm);
+}
+
+/* --------------------------------------------------------------------------
+   8. MODAL & FORMS
+   -------------------------------------------------------------------------- */
+.modal-header-icon {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+}
+
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 0.25rem rgba(79, 70, 229, 0.15);
+}
+
+/* --------------------------------------------------------------------------
+   9. MOBILE & RESPONSIVE ADJUSTMENTS
+   -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .welcome-title {
+    font-size: 1.4rem;
+  }
+  
+  .metric-value {
+    font-size: 1.35rem;
+  }
+
+  .habit-card {
+    padding: 12px;
+  }
+
+  .action-btn-group {
+    justify-content: flex-end;
+  }
+
+  .filter-pill-group {
+    width: 100%;
+    display: flex;
+  }
+
+  .filter-pill-group .filter-btn {
+    flex: 1;
+    text-align: center;
+    padding: 6px 4px;
+    font-size: 0.8rem;
+  }
+}
