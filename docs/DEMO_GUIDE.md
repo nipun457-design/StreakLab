@@ -7,27 +7,27 @@ This guide provides a structured, step-by-step demonstration sequence for presen
 ## ⏱️ Live Demonstration Timeline (5 Minutes)
 
 ```text
-[0:00 - 1:00]  Minute 1: Introduction & Problem Statement
-[1:00 - 2:00]  Minute 2: Real-Time Tracking & Streak Logic
-[2:00 - 3:00]  Minute 3: Statistical Pattern Detection Engine
-[3:00 - 4:00]  Minute 4: Hybrid AI Explanations & Offline Fallback
-[4:00 - 5:00]  Minute 5: Architecture, Tests & Production Readiness
+[0:00 - 0:45]  Segment 1: Introduction & Problem Statement
+[0:45 - 1:45]  Segment 2: Real-Time Tracking & Rest-Preserving Streaks
+[1:45 - 2:45]  Segment 3: Statistical Pattern Detection Engine
+[2:45 - 4:00]  Segment 4: Real AI Habit Coach Chatbox (Phase 6)
+[4:00 - 5:00]  Segment 5: Architecture, 63-Test Suite & Security
 ```
 
 ---
 
-### Minute 1: Introduction & Problem Statement (60 seconds)
+### Segment 1: Introduction & Problem Statement (45 seconds)
 
 * **Hook**:
-  > *"Most habit trackers simply tell you whether you did a habit today. But they fail to tell you **why** you're struggling, or **when** your willpower naturally drops. StreakLab was built to solve this problem: it pairs real-time habit tracking with an intelligent pattern detection engine that uncovers behavioral rhythms."*
+  > *"Most habit trackers simply tell you whether you did a habit today. But they fail to tell you **why** you're struggling, or **when** your willpower naturally drops. StreakLab was built to solve this problem: it pairs real-time habit tracking with an intelligent pattern detection engine and a real AI habit coach."*
 * **Open the Dashboard**:
   * Open `http://127.0.0.1:5000` in the browser.
-  * Point out the clean, modern aesthetic: Top navigation with the **Phase 5 • Hybrid AI & Analytics** badge, today's date chip, and quick KPI metrics.
-  * Point out the four summary cards: **Today's Completion Rate**, **Active Habits**, **Current Streaks**, and the **Top Consistent Habit**.
+  * Point out the clean, modern aesthetic: Top navigation with the **Phase 6 • AI Habit Coach** badge, today's date chip, and quick KPI metrics.
+  * Point out the summary cards: **Today's Completion Rate**, **Active Habits**, **Current Streaks**, and the **Top Consistent Habit**.
 
 ---
 
-### Minute 2: Real-Time Tracking & Streak Logic (60 seconds)
+### Segment 2: Real-Time Tracking & Streak Logic (60 seconds)
 
 * **Interactive Status Check-in**:
   1. Find a habit in the list (e.g., *"30-Min Python Practice"*).
@@ -44,7 +44,7 @@ This guide provides a structured, step-by-step demonstration sequence for presen
 
 ---
 
-### Minute 3: Statistical Pattern Detection Engine (60 seconds)
+### Segment 3: Statistical Pattern Detection Engine (60 seconds)
 
 * **Scroll to the Right Column** (`Habit Pattern Detector` card):
 * **Explain the Principle**:
@@ -61,23 +61,27 @@ This guide provides a structured, step-by-step demonstration sequence for presen
 
 ---
 
-### Minute 4: Hybrid AI Explanations & Offline Fallback (60 seconds)
+### Segment 4: Real AI Habit Coach Chatbox (Phase 6) (75 seconds)
 
-* **Explain the Hybrid Philosophy**:
-  > *"A critical requirement in applied AI is avoiding hallucination. In StreakLab, the AI never calculates numbers or invents streaks. The Python statistical engine is the sole source of truth. The AI's only job is to translate that evidence into supportive coaching advice."*
-* **Show the Source Badge**:
-  * Point to the small badge on each pattern card:
-    * If running offline: shows `<Rule>` (Rule-based engine).
-    * If configured with Gemini/OpenAI: shows `<AI>` (AI Coach).
-* **Show Evidence Grounding**:
-  * Point out the **Evidence box** on each card: e.g., `9 completed out of 10 evaluated check-ins (90.0% consistency)`.
-  * Point out the **Practical Recommendation**: e.g., *"Prepare your cues the evening before Friday to maintain momentum."*
-* **Demonstrate Offline Resilience**:
-  * Explain that if the Wi-Fi drops, the API key expires, or the external provider times out, the app continues functioning seamlessly using the built-in deterministic Python explainer.
+* **Open the Floating Chatbox**:
+  * Point to the bottom-right corner: notice the floating launcher button with a pulsing green indicator.
+  * Click the launcher: the sleek chat drawer slides up smoothly.
+* **Demonstrate Suggested Question Chips**:
+  1. Click the chip: *"📊 How are my habits going this week?"*.
+  2. Notice the instant typing indicator, followed by a grounded response with active habit counts and completion rates.
+  3. Notice the **evidence chips** beneath the message bubble (e.g., `7-Day Rate: 71.4%`, `Active Habits: 2`).
+  4. Notice the source badge: `<AI Powered>` (if Gemini/OpenAI configured) or `<Fallback Coach>` (if offline).
+* **Ask Follow-up Questions**:
+  * Type: *"Which habit needs the most attention?"* and press **Enter**.
+  * Observe the coach identifying the habit with the lowest completion rate and proposing a low-friction start.
+  * Type: *"Suggest a plan to improve my consistency."* -> observe the 3-step anchor stacking strategy.
+* **Session Management**:
+  * Click the **↺** button in the chat header to reset the conversation.
+  * Click the **✕** button to collapse the chat panel.
 
 ---
 
-### Minute 5: Architecture, Tests & Production Readiness (60 seconds)
+### Segment 5: Architecture, 63-Test Suite & Security (60 seconds)
 
 * **Open Terminal / PowerShell**:
 * **Run the Automated Test Suite**:
@@ -85,7 +89,7 @@ This guide provides a structured, step-by-step demonstration sequence for presen
   .\.venv\Scripts\python.exe test_app.py
   ```
 * **Walk Through the Results**:
-  > *"Here you can see our comprehensive test suite: 46 automated tests running across isolated SQLite databases, validating everything from foreign key cascades to division-by-zero protection, prompt injection sanitization, and AI provider mocking."*
+  > *"Here you can see our comprehensive test suite: 63 automated tests running across isolated SQLite databases, validating everything from foreign key cascades to prompt injection defense, rate limiting, and 100% mocked AI provider resilience."*
 * **Conclude**:
   > *"StreakLab provides a complete, robust, full-stack demonstration of applied AI: deterministic data integrity at the core, paired with grounded, helpful language coaching at the surface."*
 

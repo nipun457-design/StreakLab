@@ -480,6 +480,121 @@
   </div>
 
   <!-- ================================================================= -->
+  <!-- PHASE 6: FLOATING AI HABIT COACH CHATBOX                          -->
+  <!-- ================================================================= -->
+  <!-- Floating Launch Button (bottom-right) -->
+  <button id="chatLauncherBtn" class="chat-launcher-btn shadow-lg" type="button" aria-label="Open StreakLab AI Habit Coach" title="StreakLab AI Habit Coach">
+    <div class="chat-launcher-inner position-relative">
+      <i class="bi bi-chat-dots-fill fs-4 chat-icon-open"></i>
+      <i class="bi bi-x-lg fs-4 chat-icon-close d-none"></i>
+      <span class="position-absolute top-0 start-100 translate-middle p-1 bg-success border border-light rounded-circle chat-online-badge">
+        <span class="visually-hidden">Online</span>
+      </span>
+    </div>
+  </button>
+
+  <!-- Floating Chat Panel -->
+  <div id="chatPanel" class="chat-panel card shadow-2xl border-0 d-none" role="dialog" aria-labelledby="chatCoachTitle" aria-modal="false">
+    <!-- Chat Header -->
+    <div class="chat-header card-header d-flex align-items-center justify-content-between px-3 py-3 text-white border-0">
+      <div class="d-flex align-items-center gap-2">
+        <div class="chat-avatar-wrapper">
+          <i class="bi bi-robot fs-5"></i>
+        </div>
+        <div>
+          <h6 id="chatCoachTitle" class="fw-bold mb-0 lh-1">StreakLab AI Habit Coach</h6>
+          <small class="text-white-50 fs-xs d-flex align-items-center gap-1 mt-1">
+            <span class="chat-status-dot"></span>
+            <span id="chatCoachSubtitle">Evidence-grounded habit assistant</span>
+          </small>
+        </div>
+      </div>
+      <div class="d-flex align-items-center gap-1">
+        <button id="chatClearBtn" class="btn btn-sm btn-link text-white-50 p-1 hover-white" type="button" title="Clear conversation" aria-label="Clear conversation">
+          <i class="bi bi-arrow-counterclockwise fs-6"></i>
+        </button>
+        <button id="chatCloseBtn" class="btn btn-sm btn-link text-white-50 p-1 hover-white" type="button" title="Close chat" aria-label="Close chat">
+          <i class="bi bi-x-lg fs-6"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Chat Messages Scroll Container -->
+    <div id="chatMessages" class="chat-messages card-body p-3 overflow-y-auto" role="log" aria-live="polite">
+      <!-- Welcome Message bubble -->
+      <div class="chat-msg coach">
+        <div class="chat-msg-avatar">
+          <i class="bi bi-robot"></i>
+        </div>
+        <div class="chat-msg-content">
+          <div class="chat-bubble coach-bubble">
+            <div class="chat-bubble-text">
+              👋 <strong>Hi! I'm your StreakLab AI Habit Coach.</strong><br><br>
+              I analyze your actual daily check-in records and pattern engine insights to help you build reliable consistency. Ask me anything about your routine!
+            </div>
+            <div class="chat-bubble-meta mt-2">
+              <span class="badge bg-light text-muted border rounded-pill small"><i class="bi bi-shield-check text-success me-1"></i>StreakLab Coach</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Suggested Question Chips -->
+      <div id="chatChipsContainer" class="chat-chips-container my-2">
+        <small class="text-muted d-block mb-1 px-1 fw-semibold fs-xs">SUGGESTED QUESTIONS</small>
+        <div class="d-flex flex-wrap gap-1">
+          <button type="button" class="chat-chip-btn" data-query="How are my habits going this week?">
+            📊 How are my habits going this week?
+          </button>
+          <button type="button" class="chat-chip-btn" data-query="Which habit needs the most attention?">
+            ⚠️ Which habit needs attention?
+          </button>
+          <button type="button" class="chat-chip-btn" data-query="What patterns have you detected in my routine?">
+            🔍 What patterns have you detected?
+          </button>
+          <button type="button" class="chat-chip-btn" data-query="Suggest a realistic plan to improve my consistency.">
+            🎯 Suggest a plan to improve
+          </button>
+          <button type="button" class="chat-chip-btn" data-query="Compare my recent performance with my earlier records.">
+            📈 Compare recent vs earlier
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Typing Indicator (hidden by default) -->
+    <div id="chatTypingIndicator" class="chat-typing px-3 py-2 d-none">
+      <div class="d-flex align-items-center gap-2">
+        <div class="typing-dots">
+          <span></span><span></span><span></span>
+        </div>
+        <small class="text-muted fs-xs">Analyzing habit records...</small>
+      </div>
+    </div>
+
+    <!-- Chat Input Footer -->
+    <div class="chat-footer card-footer p-2 bg-light border-top">
+      <form id="chatForm" class="d-flex align-items-end gap-2" autocomplete="off">
+        <textarea
+          id="chatInput"
+          class="form-control form-control-sm chat-textarea"
+          rows="1"
+          placeholder="Ask your habit coach... (Enter to send)"
+          maxlength="1000"
+          aria-label="Ask your habit coach"
+        ></textarea>
+        <button id="chatSendBtn" class="btn btn-primary btn-sm rounded-circle chat-send-btn d-flex align-items-center justify-content-center" type="submit" title="Send message" aria-label="Send message">
+          <i class="bi bi-send-fill"></i>
+        </button>
+      </form>
+      <div class="d-flex justify-content-between align-items-center px-1 pt-1">
+        <small class="text-muted fs-xxs">Grounded strictly in SQLite data</small>
+        <span id="chatProviderIndicator" class="badge bg-light text-muted border fs-xxs">Offline Ready</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
   <!-- SCRIPTS: Bootstrap JS, Chart.js, and Custom App Logic             -->
   <!-- ================================================================= -->
   <!-- Bootstrap 5.3 Bundle with Popper -->

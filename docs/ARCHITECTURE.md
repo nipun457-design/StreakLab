@@ -89,6 +89,17 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
   * Automatically switches to deterministic local fallback on network errors, timeouts, or missing API keys.
   * Implements an in-memory TTL cache (5 minutes) keyed by an evidence fingerprint.
 
+### Component 6: Real AI Habit Coach Chatbox (Phase 6)
+* **Files**: `templates/index.html` (modal & launcher), `static/style.css` (chat drawer styling), `static/script.js` (DOM-safe chat rendering & session management), `app.py` (`POST /api/chat`), `ai_explainer.py` (`chat_with_coach`)
+* **Responsibilities**:
+  * Provides an interactive floating chat assistant on the dashboard.
+  * Accepts natural-language questions and bounded conversation history (`POST /api/chat`).
+  * Enforces sliding-window in-memory IP rate limiting (30 requests/minute) to prevent spam and abuse.
+  * Dynamically extracts the user's active habits, today's completion status, 7-day/30-day rates, and detected pattern evidence from SQLite.
+  * Passes verified context to Google Gemini or OpenAI with strict system instructions prohibiting statistical hallucination.
+  * Uses deterministic rule-based local coach fallback when offline or unconfigured.
+  * Renders responses strictly using `textContent` and safe DOM text nodes, guaranteeing complete XSS immunity.
+
 ---
 
 ## 3. Data Flow
@@ -129,14 +140,34 @@ sequenceDiagram
     Flask-->>Frontend: 200 OK JSON {period, summary, explanations, source}
     Frontend->>Frontend: escapeHtml() & render cards + badges
     Frontend-->>User: Updated UI with real-time insight cards
+
+    Note over User,Explainer: Conversational Habit Coach Chatbox (Phase 6)
+    User->>Frontend: Submits "Which habit needs attention?"
+    Frontend->>Flask: POST /api/chat {message, history}
+    Flask->>Flask: Validate JSON, bounds, & check IP rate limit (30 req/min)
+    Flask->>Explainer: chat_with_coach(message, history, db)
+    Explainer->>DB: get_coach_context() -> habits, streaks, 7d/30d rates, patterns
+    DB-->>Explainer: Verified SQLite Data & Evidence
+    alt AI Configured & Online
+        Explainer->>Remote AI: POST chat completion with verified SQLite evidence
+        Remote AI-->>Explainer: Conversational coaching answer
+        Explainer-->>Flask: Response {reply, source: "ai", evidence}
+    else AI Unconfigured, Offline, or Error
+        Explainer->>Explainer: generate_chat_fallback(message, context)
+        Explainer-->>Flask: Grounded deterministic answer {reply, source: "fallback", evidence}
+    end
+    Flask-->>Frontend: 200 OK JSON {success: true, reply, source, evidence, provider}
+    Frontend->>Frontend: textContent DOM rendering (safe XSS defense)
+    Frontend-->>User: Renders chat bubble with evidence tags & source badge
 ```
 
 ---
 
 ## 4. Security & Safety Boundaries
 
-1. **Prompt Injection Mitigation**: Habit names, categories, and descriptions are treated strictly as passive data tokens. User inputs are never concatenated into executable prompt instructions.
-2. **Zero External Calls on Boot/Test**: Application startup and test runs never invoke remote APIs.
-3. **No Leakage of Secrets**: API keys and raw error traces are strictly kept on the server and are never returned in JSON error responses or logs.
-4. **Non-Destructive Persistence**: Deactivating a habit sets `active = 0`, keeping historical records intact for analytics while hiding it from active daily tracking.
-5. **No Dangerous Evaluation**: The frontend uses `escapeHtml()` and DOM property bindings (`textContent`), avoiding `eval()` or unescaped HTML injection.
+1. **Prompt Injection Mitigation**: Habit names, categories, descriptions, and user queries are treated strictly as passive data tokens. Injected instructions (e.g. `SYSTEM OVERRIDE`) are completely ignored by the system prompts.
+2. **Abuse Protection & Rate Limiting**: The `/api/chat` endpoint enforces a sliding-window in-memory IP rate limiter (30 requests/60s). Excess requests receive `429 Too Many Requests`.
+3. **Zero External Calls on Boot/Test**: Application startup and test runs never invoke remote APIs. Tests use 100% mocked providers on isolated temporary databases.
+4. **No Leakage of Secrets**: API keys and raw error traces are strictly kept on the server and are never returned in JSON error responses or client payloads.
+5. **Non-Destructive Persistence**: Deactivating a habit sets `active = 0`, keeping historical records intact for analytics while hiding it from active daily tracking.
+6. **No Dangerous Evaluation**: The frontend uses `escapeHtml()` and DOM property bindings (`textContent`), avoiding `eval()` or unescaped HTML injection. User and AI chat bubbles are constructed purely with safe DOM text nodes.

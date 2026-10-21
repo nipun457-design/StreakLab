@@ -1,6 +1,6 @@
 # StreakLab Test Strategy & Verification Results
 
-This document describes the testing strategy, test cases, and actual test outcomes for **StreakLab — Habit Pattern Detector**.
+This document describes the testing strategy, test cases, and actual test outcomes for **StreakLab — Habit Pattern Detector & Real AI Habit Coach**.
 
 ---
 
@@ -8,12 +8,12 @@ This document describes the testing strategy, test cases, and actual test outcom
 
 StreakLab employs **100% isolated, deterministic automated testing**:
 * **Temporary Databases**: Every test case creates a separate temporary SQLite database via `tempfile.mkstemp(suffix='.db')`, runs schema initialization, executes tests, and cleans up the file on teardown. The user's actual database (`instance/streaklab.db`) is **never touched or modified during test runs**.
-* **Zero External AI Calls**: Tests never make live network calls to external LLM providers. Provider interactions are thoroughly tested using `unittest.mock` (simulating successful AI output, network timeouts, and malformed provider responses).
+* **Zero External AI Calls**: Tests never make live network calls to external LLM providers. Provider interactions are thoroughly tested using `unittest.mock` (simulating successful AI output, network timeouts, provider 500 errors, rate limits, and malformed provider responses).
 * **Deterministic Fixtures**: All streaks and date ranges use relative date calculations (`date.today() - timedelta(days=n)`) so tests remain evergreen regardless of execution date.
 
 ---
 
-## 2. Test Suite Breakdown (46 Automated Tests)
+## 2. Test Suite Breakdown (63 Automated Tests)
 
 | Category | Count | Focus Areas |
 | :--- | :---: | :--- |
@@ -25,7 +25,8 @@ StreakLab employs **100% isolated, deterministic automated testing**:
 | **Hybrid AI Explanations** | 7 | Endpoint structure, empty DB fallback, validation, provider mocking, error resilience |
 | **Cache & Performance** | 3 | In-memory cache hit, mutation-triggered invalidation, `refresh=true` query flag |
 | **Security & Safety** | 3 | Prompt injection sanitization, zero external calls offline, secrets containment |
-| **Total** | **46** | **All 46 tests passing** |
+| **Phase 6: Real AI Habit Coach Chat** | 17 | Valid chat mock, empty/missing message, malformed JSON, non-string types, length bounds, history validation, no-key fallback, timeout fallback, 30 req/min rate limit, provider error fallback, invalid provider response, intent coverage, source labeling (`ai` vs `fallback`), evidence grounding, zero habits handling, injection defense, secrets leakage containment |
+| **Total** | **63** | **All 63 tests passing with 0 failures** |
 
 ---
 
@@ -40,9 +41,13 @@ StreakLab employs **100% isolated, deterministic automated testing**:
 ```text
 ...........................AI provider returned invalid non-list response; using local fallback.
 ..AI provider failed (gemini): Connection timed out. Gracefully falling back to local engine.
-.................
+.............AI provider returned empty chat response; using local fallback.
+....AI Coach provider failed (gemini): URLError: Failed connecting with key AI_KEY_VERY_SECRET_DO_NOT_REVEAL_XYZ123. Falling back to local coach.
+....AI Coach provider failed (gemini): Connection timed out. Falling back to local coach.
+.AI Coach provider failed (gemini): Gemini API returned HTTP 500. Falling back to local coach.
+............
 ----------------------------------------------------------------------
-Ran 46 tests in 3.791s
+Ran 63 tests in 2.227s
 
 OK
 ```
@@ -93,6 +98,25 @@ OK
 * `test_phase4_cache_and_invalidation`: Verifies in-memory cache hit on repeat queries and automatic invalidation on record mutations.
 * `test_phase4_no_external_calls_offline`: Asserts that `urllib.request.urlopen` is **never called** when AI credentials are unset.
 
+### F. Phase 6 Real AI Habit Coach Chatbox (17 Scenarios)
+* `test_phase6_valid_chat_mocked_ai_response`: Validates `POST /api/chat` with mocked Gemini AI response (`source: "ai"`, `provider: "gemini"`).
+* `test_phase6_missing_or_empty_message`: Asserts `400 Bad Request` on missing, empty, or whitespace-only message bodies.
+* `test_phase6_malformed_json`: Asserts `400 Bad Request` on non-JSON content types and malformed JSON syntax.
+* `test_phase6_non_string_message`: Asserts `400 Bad Request` on integers, booleans, lists, and dicts passed as messages.
+* `test_phase6_excessively_long_message`: Asserts `400 Bad Request` on messages exceeding 1,000 characters.
+* `test_phase6_oversized_or_malformed_conversation_history`: Enforces array type, max 20 history messages, and content length caps.
+* `test_phase6_missing_api_key_deterministic_fallback`: Verifies seamless local coaching fallback when `AI_API_KEY` is unconfigured.
+* `test_phase6_provider_timeout_fallback`: Verifies app returns `200 OK` with grounded local fallback upon remote timeout.
+* `test_phase6_rate_limit_and_provider_error`: Verifies sliding-window rate limit triggers `429` on 31st request/min; remote 500 error triggers fallback.
+* `test_phase6_invalid_provider_response`: Confirms corrupted or empty LLM response safely triggers local fallback.
+* `test_phase6_correct_fallback_behavior_intents`: Verifies rule-based responses across 6 core intents (progress, weak habit, patterns, suggestions, comparison, greetings).
+* `test_phase6_source_label_ai_and_fallback`: Confirms source badges are accurately labeled as `"ai"` vs `"fallback"`.
+* `test_phase6_evidence_grounding_real_habit_records`: Confirms numerical evidence chips match actual SQLite stored records.
+* `test_phase6_insufficient_data_handling`: Asserts zero active habits produces helpful prompt to add habits without hallucinating records.
+* `test_phase6_prompt_injection_defense`: Verifies malicious queries and SQL injection in habit names cannot breach system instructions or drop tables.
+* `test_phase6_no_api_key_or_secrets_leaked_in_responses`: Verifies API keys in mock exceptions are scrubbed and never returned to the client.
+* `test_phase6_existing_endpoints_regression_protection`: Verifies habits, records, analytics, insights, and explanations endpoints remain intact.
+
 ---
 
 ## 5. Manual Verification Checklist
@@ -106,5 +130,11 @@ OK
 | Add new habit via modal | Form validates, closes modal automatically, habit appears in list | ✅ Verified |
 | Filter by Morning / Afternoon | List filters instantly without page reload | ✅ Verified |
 | Change Window selector (7..90) | Insights reload with correct period metrics | ✅ Verified |
-| Inspect without AI key | Footer displays `Rule Engine`, all explanations render cleanly | ✅ Verified |
-| Set `AI_PROVIDER=gemini` & key | Footer displays `AI (gemini)`, explanations render AI coaching | ✅ Verified |
+| Click Floating Chat Launcher | Chatbox drawer slides up smoothly at bottom-right | ✅ Verified |
+| Click Quick Question Chip | Immediately sends question and streams evidence-grounded response | ✅ Verified |
+| Press Enter in Chat Textarea | Sends message, disables input while loading, auto-scrolls to bottom | ✅ Verified |
+| Shift+Enter in Chat Textarea | Inserts newline without premature sending | ✅ Verified |
+| Click "↺" Clear Chat Button | Resets chat session to initial greeting and suggested question chips | ✅ Verified |
+| Close Chat via "✕" Button | Chatbox collapses, launcher icon resets | ✅ Verified |
+| Inspect without AI key | Footer displays `Offline Ready` / `Fallback Coach` | ✅ Verified |
+| Set `AI_PROVIDER=gemini` & key | Displays `GEMINI AI` badge with conversational coaching | ✅ Verified |

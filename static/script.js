@@ -56,6 +56,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Step E: Load rule-based habit pattern insights (Phase 3)
   loadInsightsFromApi(currentInsightsDays);
+
+  // Step F: Initialize AI Habit Coach Chatbox (Phase 6)
+  initChatCoach();
 });
 
 /**
@@ -1165,3 +1168,411 @@ function renderInsights(itemsList, periodDays = 30) {
     `;
   }).join("");
 }
+
+// ============================================================================
+// PHASE 6: STREAKLAB AI HABIT COACH CHATBOX CLIENT LOGIC
+// ============================================================================
+
+let chatHistory = [];
+let isChatOpen = false;
+let isChatSending = false;
+let lastUserMessage = "";
+
+/**
+ * Initializes the AI Habit Coach chat panel, event listeners, and chips.
+ */
+function initChatCoach() {
+  const launcherBtn = document.getElementById("chatLauncherBtn");
+  const closeBtn = document.getElementById("chatCloseBtn");
+  const clearBtn = document.getElementById("chatClearBtn");
+  const chatForm = document.getElementById("chatForm");
+  const chatInput = document.getElementById("chatInput");
+  const chipsContainer = document.getElementById("chatChipsContainer");
+
+  if (!launcherBtn) return;
+
+  // Toggle chat panel visibility
+  launcherBtn.addEventListener("click", () => {
+    toggleChatPanel();
+  });
+
+  // Close chat panel button
+  if (closeBtn) {
+    closeBtn.addEventListener("click", () => {
+      closeChatPanel();
+    });
+  }
+
+  // Clear chat history
+  if (clearBtn) {
+    clearBtn.addEventListener("click", () => {
+      clearChatHistory();
+    });
+  }
+
+  // Handle form submission
+  if (chatForm) {
+    chatForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      submitChatMessage();
+    });
+  }
+
+  // Textarea: Enter to send, Shift+Enter for new line
+  if (chatInput) {
+    chatInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        submitChatMessage();
+      }
+    });
+
+    // Auto-expand textarea height slightly as user types
+    chatInput.addEventListener("input", () => {
+      chatInput.style.height = "auto";
+      chatInput.style.height = Math.min(chatInput.scrollHeight, 100) + "px";
+    });
+  }
+
+  // Quick question chips
+  if (chipsContainer) {
+    chipsContainer.addEventListener("click", (e) => {
+      const chip = e.target.closest(".chat-chip-btn");
+      if (!chip) return;
+      const query = chip.getAttribute("data-query");
+      if (query && !isChatSending) {
+        sendChatMessage(query);
+      }
+    });
+  }
+}
+
+/**
+ * Opens or closes the floating chat panel.
+ */
+function toggleChatPanel() {
+  const panel = document.getElementById("chatPanel");
+  const launcher = document.getElementById("chatLauncherBtn");
+  const openIcon = launcher ? launcher.querySelector(".chat-icon-open") : null;
+  const closeIcon = launcher ? launcher.querySelector(".chat-icon-close") : null;
+  const chatInput = document.getElementById("chatInput");
+
+  if (!panel) return;
+
+  isChatOpen = !isChatOpen;
+  if (isChatOpen) {
+    panel.classList.remove("d-none");
+    if (openIcon) openIcon.classList.add("d-none");
+    if (closeIcon) closeIcon.classList.remove("d-none");
+    scrollChatToBottom();
+    setTimeout(() => {
+      if (chatInput && window.innerWidth > 576) chatInput.focus();
+    }, 150);
+  } else {
+    panel.classList.add("d-none");
+    if (openIcon) openIcon.classList.remove("d-none");
+    if (closeIcon) closeIcon.classList.add("d-none");
+  }
+}
+
+/**
+ * Closes the floating chat panel.
+ */
+function closeChatPanel() {
+  const panel = document.getElementById("chatPanel");
+  const launcher = document.getElementById("chatLauncherBtn");
+  const openIcon = launcher ? launcher.querySelector(".chat-icon-open") : null;
+  const closeIcon = launcher ? launcher.querySelector(".chat-icon-close") : null;
+
+  if (!panel) return;
+  isChatOpen = false;
+  panel.classList.add("d-none");
+  if (openIcon) openIcon.classList.remove("d-none");
+  if (closeIcon) closeIcon.classList.add("d-none");
+}
+
+/**
+ * Clears the chat conversation history and resets to initial welcome message.
+ */
+function clearChatHistory() {
+  chatHistory = [];
+  lastUserMessage = "";
+  const messagesContainer = document.getElementById("chatMessages");
+  if (!messagesContainer) return;
+
+  // Retain only welcome message and suggestions
+  messagesContainer.innerHTML = `
+    <div class="chat-msg coach">
+      <div class="chat-msg-avatar">
+        <i class="bi bi-robot"></i>
+      </div>
+      <div class="chat-msg-content">
+        <div class="chat-bubble coach-bubble">
+          <div class="chat-bubble-text">
+            👋 <strong>Conversation reset!</strong><br><br>
+            I'm ready with your latest habit records. Ask me anything about your current progress or routine!
+          </div>
+          <div class="chat-bubble-meta mt-2">
+            <span class="badge bg-light text-muted border rounded-pill small"><i class="bi bi-shield-check text-success me-1"></i>StreakLab Coach</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="chatChipsContainer" class="chat-chips-container my-2">
+      <small class="text-muted d-block mb-1 px-1 fw-semibold fs-xs">SUGGESTED QUESTIONS</small>
+      <div class="d-flex flex-wrap gap-1">
+        <button type="button" class="chat-chip-btn" data-query="How are my habits going this week?">
+          📊 How are my habits going this week?
+        </button>
+        <button type="button" class="chat-chip-btn" data-query="Which habit needs the most attention?">
+          ⚠️ Which habit needs attention?
+        </button>
+        <button type="button" class="chat-chip-btn" data-query="What patterns have you detected in my routine?">
+          🔍 What patterns have you detected?
+        </button>
+        <button type="button" class="chat-chip-btn" data-query="Suggest a realistic plan to improve my consistency.">
+          🎯 Suggest a plan to improve
+        </button>
+        <button type="button" class="chat-chip-btn" data-query="Compare my recent performance with my earlier records.">
+          📈 Compare recent vs earlier
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+/**
+ * Handles sending chat messages from input field.
+ */
+function submitChatMessage() {
+  const input = document.getElementById("chatInput");
+  if (!input || isChatSending) return;
+
+  const text = input.value.trim();
+  if (!text) return;
+
+  input.value = "";
+  input.style.height = "auto";
+  sendChatMessage(text);
+}
+
+/**
+ * Formats untrusted message text into safe DOM nodes.
+ * Avoids innerHTML for XSS safety while supporting paragraph breaks,
+ * bullet points, and **bold** markdown formatting.
+ */
+function appendSafeFormattedText(container, rawText) {
+  if (!rawText) return;
+
+  const lines = String(rawText).split("\n");
+  lines.forEach((line, lineIndex) => {
+    if (lineIndex > 0) {
+      container.appendChild(document.createElement("br"));
+    }
+
+    // Split line by bold delimiters (**text**)
+    const parts = line.split(/(\*\*[^*]+\*\*)/g);
+    parts.forEach(part => {
+      if (part.startsWith("**") && part.endsWith("**") && part.length > 4) {
+        const strong = document.createElement("strong");
+        strong.textContent = part.slice(2, -2);
+        container.appendChild(strong);
+      } else if (part) {
+        container.appendChild(document.createTextNode(part));
+      }
+    });
+  });
+}
+
+/**
+ * Appends a safe message bubble to the chat message container.
+ */
+function appendChatBubble(role, text, source, evidence = [], isError = false) {
+  const container = document.getElementById("chatMessages");
+  if (!container) return;
+
+  const msgDiv = document.createElement("div");
+  msgDiv.className = `chat-msg ${role === "user" ? "user" : "coach"}`;
+
+  // Avatar for coach
+  if (role !== "user") {
+    const avatar = document.createElement("div");
+    avatar.className = "chat-msg-avatar";
+    const icon = document.createElement("i");
+    icon.className = isError ? "bi bi-exclamation-triangle-fill text-danger" : "bi bi-robot";
+    avatar.appendChild(icon);
+    msgDiv.appendChild(avatar);
+  }
+
+  const contentDiv = document.createElement("div");
+  contentDiv.className = "chat-msg-content";
+
+  const bubbleDiv = document.createElement("div");
+  bubbleDiv.className = `chat-bubble ${role === "user" ? "user-bubble" : "coach-bubble"}`;
+  if (isError) {
+    bubbleDiv.classList.add("border-danger-subtle", "bg-danger-subtle", "text-danger");
+  }
+
+  const textDiv = document.createElement("div");
+  textDiv.className = "chat-bubble-text";
+  appendSafeFormattedText(textDiv, text);
+  bubbleDiv.appendChild(textDiv);
+
+  // Evidence chips if provided
+  if (Array.isArray(evidence) && evidence.length > 0) {
+    const evDiv = document.createElement("div");
+    evDiv.className = "chat-evidence-tags";
+    evidence.forEach(item => {
+      if (item && item.label && item.value !== undefined) {
+        const badge = document.createElement("span");
+        badge.className = "badge";
+        badge.textContent = `${item.label}: ${item.value}`;
+        evDiv.appendChild(badge);
+      }
+    });
+    bubbleDiv.appendChild(evDiv);
+  }
+
+  // Meta label (source indicator)
+  if (role !== "user") {
+    const metaDiv = document.createElement("div");
+    metaDiv.className = "chat-bubble-meta";
+
+    const badge = document.createElement("span");
+    badge.className = "badge border rounded-pill small";
+
+    if (isError) {
+      badge.className += " bg-danger text-white";
+      badge.textContent = "Error";
+    } else if (source === "ai") {
+      badge.className += " bg-purple-subtle text-purple border-purple-subtle";
+      const icon = document.createElement("i");
+      icon.className = "bi bi-stars me-1";
+      badge.appendChild(icon);
+      badge.appendChild(document.createTextNode("AI Powered"));
+    } else {
+      badge.className += " bg-light text-muted";
+      const icon = document.createElement("i");
+      icon.className = "bi bi-shield-check text-success me-1";
+      badge.appendChild(icon);
+      badge.appendChild(document.createTextNode("Fallback Coach"));
+    }
+    metaDiv.appendChild(badge);
+
+    // If error, add a retry button
+    if (isError && lastUserMessage) {
+      const retryBtn = document.createElement("button");
+      retryBtn.className = "btn btn-xs btn-outline-danger rounded-pill px-2 py-0 ms-1";
+      retryBtn.style.fontSize = "0.7rem";
+      retryBtn.textContent = "Retry";
+      retryBtn.onclick = () => {
+        sendChatMessage(lastUserMessage);
+      };
+      metaDiv.appendChild(retryBtn);
+    }
+
+    bubbleDiv.appendChild(metaDiv);
+  }
+
+  contentDiv.appendChild(bubbleDiv);
+  msgDiv.appendChild(contentDiv);
+  container.appendChild(msgDiv);
+
+  scrollChatToBottom();
+}
+
+/**
+ * Scrolls the chat messages container to the bottom.
+ */
+function scrollChatToBottom() {
+  const container = document.getElementById("chatMessages");
+  if (container) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+/**
+ * Sends a message to the backend /api/chat endpoint.
+ */
+async function sendChatMessage(message) {
+  if (isChatSending || !message.trim()) return;
+
+  const trimmed = message.trim();
+  lastUserMessage = trimmed;
+  isChatSending = true;
+
+  const input = document.getElementById("chatInput");
+  const sendBtn = document.getElementById("chatSendBtn");
+  const typingIndicator = document.getElementById("chatTypingIndicator");
+  const providerIndicator = document.getElementById("chatProviderIndicator");
+
+  if (sendBtn) sendBtn.disabled = true;
+  if (input) input.disabled = true;
+  if (typingIndicator) typingIndicator.classList.remove("d-none");
+
+  // Render user bubble
+  appendChatBubble("user", trimmed);
+
+  // Add to bounded in-memory session history
+  chatHistory.push({ role: "user", content: trimmed });
+  if (chatHistory.length > 16) {
+    chatHistory = chatHistory.slice(-16);
+  }
+
+  try {
+    const response = await fetch("/api/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        message: trimmed,
+        history: chatHistory.slice(-10)
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const errMsg = (data && data.error) ? data.error : `Server returned HTTP ${response.status}`;
+      appendChatBubble("coach", errMsg, "fallback", [], true);
+      return;
+    }
+
+    const reply = data.reply || "I couldn't generate a response for that query.";
+    const source = data.source || "fallback";
+    const evidence = data.evidence || [];
+    const provider = data.provider || "local_fallback";
+
+    // Add assistant reply to bounded history
+    chatHistory.push({ role: "assistant", content: reply });
+
+    // Render coach bubble safely
+    appendChatBubble("coach", reply, source, evidence, false);
+
+    // Update status badge
+    if (providerIndicator) {
+      if (source === "ai") {
+        providerIndicator.textContent = provider.toUpperCase() + " AI";
+        providerIndicator.className = "badge bg-purple-subtle text-purple border border-purple-subtle fs-xxs";
+      } else {
+        providerIndicator.textContent = "Offline Coach";
+        providerIndicator.className = "badge bg-light text-muted border fs-xxs";
+      }
+    }
+
+  } catch (err) {
+    console.error("Chat request failed:", err);
+    appendChatBubble("coach", "Connection error. Unable to reach StreakLab server. Please check your connection and try again.", "fallback", [], true);
+  } finally {
+    isChatSending = false;
+    if (sendBtn) sendBtn.disabled = false;
+    if (input) {
+      input.disabled = false;
+      if (window.innerWidth > 576) input.focus();
+    }
+    if (typingIndicator) typingIndicator.classList.add("d-none");
+    scrollChatToBottom();
+  }
+}
+

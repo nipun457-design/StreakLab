@@ -1,8 +1,8 @@
-# 🔥 StreakLab — Habit Pattern Detector
+# 🔥 StreakLab — Habit Pattern Detector & Real AI Habit Coach
 
 A smart habit tracking and behavioral analytics platform for students, developers, and habit-builders.
 
-StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based Statistical Pattern Engine** and a **Hybrid AI Coaching Layer**—delivering actionable routine insights, quantifying consistency trends, and providing evidence-grounded recommendations while remaining 100% functional offline.
+StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based Statistical Pattern Engine**, a **Hybrid AI Coaching Layer**, and an interactive **Floating AI Habit Coach Chatbox**—delivering conversational habit insights, quantifying consistency trends, and providing evidence-grounded recommendations while remaining 100% functional offline.
 
 ---
 
@@ -12,8 +12,9 @@ StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based 
 * **The Solution**: StreakLab introduces:
   1. **Rest-Preserving Streaks**: Excused pauses (`skipped`) preserve consecutive momentum.
   2. **Deterministic Pattern Engine**: Quantifies weekday drop-offs, peak days, time-of-day biases, and consecutive missed trends.
-  3. **Hybrid AI Explanations**: Grounded exclusively in actual SQLite records; never hallucinates statistics or claims unearned streaks.
-  4. **Guaranteed Offline Resilience**: Runs seamlessly without internet access or API keys using deterministic local fallbacks.
+  3. **Real AI Habit Coach Chatbox (Phase 6)**: An interactive floating coach grounded directly in your SQLite check-in history. Ask questions naturally and receive conversational coaching without hallucinations.
+  4. **Hybrid AI Explanations**: Grounded exclusively in actual SQLite records; never hallucinates statistics or claims unearned streaks.
+  5. **Guaranteed Offline Resilience**: Runs seamlessly without internet access or API keys using deterministic local fallbacks.
 * **Target Users**:
   * Students balancing coursework, project deadlines, and personal habits.
   * Developers establishing daily coding, reading, and wellness routines.
@@ -25,12 +26,12 @@ StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based 
 
 | Layer | Technologies | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | HTML5, Vanilla ES6 JavaScript, Bootstrap 5.3, Bootstrap Icons, Chart.js | Responsive SPA dashboard, modal forms, Chart.js graphs, filter pills, XSS-safe DOM rendering |
-| **Backend** | Python 3.14+, Flask 3.1+ | RESTful API, request validation, error handlers, contextual database connection management (`g.db`) |
+| **Frontend** | HTML5, Vanilla ES6 JavaScript, Bootstrap 5.3, Bootstrap Icons, Chart.js | Responsive SPA dashboard, modal forms, Chart.js graphs, floating AI chatbox with chips and bubbles, XSS-safe DOM rendering |
+| **Backend** | Python 3.14+, Flask 3.1+ | RESTful API, request validation, sliding-window rate limiting, contextual database connection management (`g.db`) |
 | **Database** | SQLite 3 (`instance/streaklab.db`) | ACID persistence, foreign key enforcement (`PRAGMA foreign_keys = ON`), UPSERT conflict handling, indices |
 | **Statistical Engine** | Python (`pattern_engine.py`) | **Source of Truth**: Best streaks, active completion rates, weekday drop-offs, peak days, consecutive misses |
-| **Hybrid AI Explainer**| Python (`ai_explainer.py`), Google Gemini / OpenAI APIs | Evidence-grounded explanations, prompt injection defense, TTL caching, deterministic offline fallback |
-| **Automated Testing**  | Python `unittest`, `unittest.mock` (`test_app.py`) | 46 isolated automated unit and integration tests using temporary SQLite databases |
+| **AI Habit Coach** | Python (`ai_explainer.py`), Google Gemini / OpenAI APIs | Conversational habit coaching grounded in SQLite data, prompt injection defense, sliding-window IP rate limiter, deterministic offline fallback |
+| **Automated Testing**  | Python `unittest`, `unittest.mock` (`test_app.py`) | 63 isolated automated unit and integration tests using temporary SQLite databases (100% mocked AI) |
 
 ---
 
@@ -249,7 +250,48 @@ AI_TIMEOUT=6
 
 ---
 
-### 2. Analytics & Visualizations
+### 2. Conversational AI Habit Coach Chatbox (Phase 6)
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/chat` | Send a natural-language query to the StreakLab AI Habit Coach grounded strictly in SQLite habit records |
+
+#### Request Schema:
+```json
+{
+  "message": "How are my habits going this week?",
+  "history": [
+    {"role": "user", "content": "Hello coach!"},
+    {"role": "assistant", "content": "Hello! I am StreakLab AI Habit Coach..."}
+  ]
+}
+```
+
+#### Response Schema (`200 OK`):
+```json
+{
+  "success": true,
+  "reply": "Here is how your habits are tracking this week:\n\n• Today you have completed 1 of 2 scheduled habits.\n• Over the past 7 days, your overall completion rate is 71.4% (5 completed, 2 missed).\n\n🔥 **Top Performer:** 'Morning 30-min Coding' with a 100% rate and an active 4-day streak.",
+  "source": "ai",
+  "evidence": [
+    {"label": "7-Day Rate", "value": "71.4%"},
+    {"label": "Active Habits", "value": "2"}
+  ],
+  "provider": "gemini"
+}
+```
+
+#### Validation & Guardrails:
+* Content-Type must be `application/json` (returns `400` on malformed or non-JSON payloads).
+* `message`: Required non-empty string, max 1,000 characters.
+* `history`: Array bounded to max 20 items, max 1,000 chars per message.
+* Abuse protection: Sliding-window in-memory IP rate limiter (30 requests/minute, returns `429 Too Many Requests`).
+* Prompt-injection defense: Database fields and user queries are treated as passive data. Attempts to override instructions or dump secrets are ignored.
+* Offline fallback: Returns `source: "fallback"` and `provider: "local_fallback"` with deterministic responses when unconfigured or offline.
+
+---
+
+### 3. Analytics & Visualizations
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -259,7 +301,7 @@ AI_TIMEOUT=6
 
 ---
 
-### 3. Habits & Records CRUD
+### 4. Habits & Records CRUD
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
@@ -282,7 +324,22 @@ AI_TIMEOUT=6
 cd c:\Users\nipun\OneDrive\Desktop\StreakLab
 ```
 
-### Step 2: Run the Complete Automated Test Suite (46 Tests)
+### Step 2: Configure Optional AI Provider (Securely in PowerShell)
+The application works 100% offline with zero configuration. To connect a real AI provider:
+
+```powershell
+# Copy the template to .env (git-ignored)
+Copy-Item .env.example .env
+
+# Configure your provider and API key in .env (or in PowerShell session):
+$env:AI_PROVIDER="gemini"
+$env:AI_API_KEY="your_actual_google_gemini_api_key_here"
+$env:AI_MODEL="gemini-1.5-flash"
+```
+
+> **Security Note**: Never commit `.env` or paste your API key in Git-tracked files. `.env` is permanently excluded via `.gitignore`.
+
+### Step 3: Run the Complete Automated Test Suite (63 Tests)
 ```powershell
 .\.venv\Scripts\python.exe test_app.py
 ```
@@ -290,40 +347,50 @@ cd c:\Users\nipun\OneDrive\Desktop\StreakLab
 ```text
 ...........................AI provider returned invalid non-list response; using local fallback.
 ..AI provider failed (gemini): Connection timed out. Gracefully falling back to local engine.
-.................
+.............AI provider returned empty chat response; using local fallback.
+....AI Coach provider failed (gemini): URLError: Failed connecting with key AI_KEY_VERY_SECRET_DO_NOT_REVEAL_XYZ123. Falling back to local coach.
+....AI Coach provider failed (gemini): Connection timed out. Falling back to local coach.
+.AI Coach provider failed (gemini): Gemini API returned HTTP 500. Falling back to local coach.
+............
 ----------------------------------------------------------------------
-Ran 46 tests in 3.791s
+Ran 63 tests in 2.227s
 
 OK
 ```
 
-### Step 3: Start the Flask Application
+### Step 4: Start the Flask Application
 ```powershell
 .\.venv\Scripts\python.exe app.py
 ```
 **Console Output**:
 ```text
 ============================================================
-[*] Starting StreakLab Flask Backend with SQLite (Phase 5)...
+[*] Starting StreakLab Flask Backend with SQLite (Phase 6)...
 [*] Database Path : C:\Users\nipun\OneDrive\Desktop\StreakLab\instance\streaklab.db
 [*] Dashboard URL  : http://127.0.0.1:5000
 [*] Health API    : http://127.0.0.1:5000/api/health
 [*] Habits API    : http://127.0.0.1:5000/api/habits
 [*] Insights API  : http://127.0.0.1:5000/api/insights/explanations
+[*] Chat API      : http://127.0.0.1:5000/api/chat
 ============================================================
  * Serving Flask app 'app'
  * Debug mode: on
  * Running on http://127.0.0.1:5000
 ```
 
-### Step 4: Explore the Dashboard in Your Browser
+### Step 5: Explore the AI Habit Coach in Your Browser
 1. Open **`http://127.0.0.1:5000`** in any modern web browser.
-2. Check the top navbar for the **Phase 5 • Hybrid AI & Analytics** badge.
-3. In the right column under **Habit Pattern Detector**:
-   - Notice the **Source indicator** (`Rule Engine` when offline, `AI (provider)` when configured).
-   - Use the window dropdown (**7**, **14**, **30**, **60**, **90** days) to toggle analysis horizons.
-   - Observe evidence pills and practical recommendations for each detected pattern.
-4. Check in habits (Done, Missed, Skipped) and watch KPI counters, Chart.js graphs, and pattern explanations update in real time.
+2. Look at the bottom-right corner for the **floating AI Habit Coach button** (pulsing badge).
+3. Click the launcher button to open the responsive chatbox drawer.
+4. Try clicking any of the suggested question chips:
+   - *"How are my habits going this week?"*
+   - *"Which habit needs the most attention?"*
+   - *"What patterns have you detected in my routine?"*
+   - *"Suggest a realistic plan to improve my consistency."*
+   - *"Compare my recent performance with my earlier records."*
+5. Type custom questions and press **Enter** (or Shift+Enter for new line).
+6. Notice the typing indicator, grounded evidence chips, and `AI Powered` or `Fallback Coach` badges.
+7. Click the **↺** clear button in the chat header to reset conversation history.
 
 ---
 
@@ -338,9 +405,9 @@ OK
 
 ## 📚 Supplementary Documentation
 
-* **[Architecture Document](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/ARCHITECTURE.md)**: System flow diagrams, component boundaries, and security model.
-* **[Testing Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/TESTING.md)**: Full test matrix, isolation details, and manual verification checklist.
-* **[Demo Presentation Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/DEMO_GUIDE.md)**: Step-by-step 5-minute live demonstration script for presentations.
+* **[Architecture Document](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/ARCHITECTURE.md)**: System flow diagrams, component boundaries, chat sequence, and security model.
+* **[Testing Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/TESTING.md)**: Full test matrix (63 test cases), isolation details, and manual verification checklist.
+* **[Demo Presentation Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/DEMO_GUIDE.md)**: Step-by-step 5-minute live demonstration script including the AI Chatbox.
 
 ---
 
@@ -351,4 +418,5 @@ OK
 - [x] **Phase 2B**: SQLite database integration (`instance/streaklab.db`), RESTful API endpoints, streak calculation, and frontend API wiring.
 - [x] **Phase 3**: Rule-based habit pattern detection engine (`pattern_engine.py`), `/api/insights`, `/api/analytics`, configurable window selector, and statistical metrics.
 - [x] **Phase 4**: Hybrid AI explanation and recommendation engine (`ai_explainer.py`), Gemini and OpenAI integrations, local deterministic fallback, in-memory cache with mutation invalidation, and `/api/insights/explanations`.
-- [x] **Phase 5**: Final Polish, Edge-Case Verification, Expanded 46-Test Suite, Comprehensive Documentation (`docs/`), and Submission Preparation.
+- [x] **Phase 5**: Final Polish, Edge-Case Verification, Expanded Test Suite, Comprehensive Documentation (`docs/`), and Submission Preparation.
+- [x] **Phase 6**: Real AI Habit Coach Chatbox (`/api/chat`), floating frontend chatbox with suggestion chips, DOM-safe rendering, evidence grounding, sliding-window rate limiting, and 17 automated mock-isolated test scenarios.

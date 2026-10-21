@@ -13,11 +13,14 @@ Phase 2B: SQLite Database Integration & RESTful API
 """
 
 import os
+import logging
 import sqlite3
 from datetime import datetime, timedelta, date
 from flask import Flask, render_template, jsonify, request, g
 from pattern_engine import analyze_habit_patterns, analyze_single_habit, get_habit_analytics
 import ai_explainer
+
+logger = logging.getLogger("streaklab.app")
 
 # Initialize Flask application
 app = Flask(__name__, template_folder='templates', static_folder='static')
@@ -752,6 +755,103 @@ def get_analytics():
 
 
 # ---------------------------------------------------------------------------
+# PHASE 6: AI HABIT COACH CHAT REST API ENDPOINT
+# ---------------------------------------------------------------------------
+
+@app.route('/api/chat', methods=['POST'])
+def chat_with_coach_api():
+    """
+    Phase 6: Conversational AI Habit Coach Chatbox endpoint.
+    Accepts:
+      {
+        "message": "How are my habits going this week?",
+        "history": [{"role": "user"|"assistant", "content": "..."}]
+      }
+    Returns:
+      {
+        "success": true,
+        "reply": "...",
+        "source": "ai" | "fallback",
+        "evidence": [...],
+        "provider": "gemini" | "openai" | "local_fallback"
+      }
+    """
+    # 1. Validate JSON Content-Type
+    if not request.is_json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    # 2. Parse JSON body
+    try:
+        data = request.get_json(silent=False)
+    except Exception:
+        return jsonify({"error": "Malformed JSON payload"}), 400
+
+    if data is None or not isinstance(data, dict):
+        return jsonify({"error": "Malformed JSON payload"}), 400
+
+    # 3. Validate message field
+    if 'message' not in data:
+        return jsonify({"error": "Message is required"}), 400
+
+    raw_message = data['message']
+    if not isinstance(raw_message, str):
+        return jsonify({"error": "Message must be a string"}), 400
+
+    message = raw_message.strip()
+    if not message:
+        return jsonify({"error": "Message cannot be empty"}), 400
+
+    if len(message) > 1000:
+        return jsonify({"error": "Message is too long (maximum 1000 characters)"}), 400
+
+    # 4. Validate history field
+    history = data.get('history', [])
+    if history is None:
+        history = []
+    elif not isinstance(history, list):
+        return jsonify({"error": "History must be an array"}), 400
+
+    if len(history) > 20:
+        return jsonify({"error": "History exceeds maximum allowed limit (20 messages)"}), 400
+
+    cleaned_history = []
+    for item in history:
+        if not isinstance(item, dict):
+            return jsonify({"error": "Malformed history item: must be an object"}), 400
+        role = item.get('role', 'user')
+        content = item.get('content')
+        if content is None or not isinstance(content, str):
+            return jsonify({"error": "Malformed history item: content must be a string"}), 400
+        if len(content) > 1000:
+            return jsonify({"error": "History item content is too long (maximum 1000 characters)"}), 400
+        cleaned_history.append({"role": "model" if role in ("model", "assistant") else "user", "content": content})
+
+    # 5. IP-based sliding window rate limiting (abuse protection)
+    client_ip = request.remote_addr or "127.0.0.1"
+    if not ai_explainer.check_chat_rate_limit(client_ip):
+        return jsonify({"error": "Too many requests. Please wait a moment before sending another message."}), 429
+
+    # 6. Execute coach response grounded in SQLite data
+    try:
+        db = get_db()
+        result = ai_explainer.chat_with_coach(message=message, history=cleaned_history, db=db)
+        ai_cfg = ai_explainer.get_ai_config()
+
+        provider_name = ai_cfg["provider"] if (ai_cfg["is_configured"] and result.get("source") == "ai") else "local_fallback"
+
+        return jsonify({
+            "success": True,
+            "reply": result.get("reply", ""),
+            "source": result.get("source", "fallback"),
+            "evidence": result.get("evidence", []),
+            "provider": provider_name
+        }), 200
+    except Exception as exc:
+        logger.error(f"Error handling chat request: {exc}")
+        return jsonify({"error": "An error occurred while processing your message."}), 500
+
+
+# ---------------------------------------------------------------------------
 # ERROR HANDLERS (CLEAN JSON RESPONSES WITHOUT LEAKING SENSITIVE DATA)
 # ---------------------------------------------------------------------------
 
@@ -777,11 +877,12 @@ with app.app_context():
 
 if __name__ == '__main__':
     print("\n" + "=" * 60)
-    print("[*] Starting StreakLab Flask Backend with SQLite (Phase 5)...")
+    print("[*] Starting StreakLab Flask Backend with SQLite (Phase 6)...")
     print(f"[*] Database Path : {app.config['DATABASE']}")
     print("[*] Dashboard URL  : http://127.0.0.1:5000")
     print("[*] Health API    : http://127.0.0.1:5000/api/health")
     print("[*] Habits API    : http://127.0.0.1:5000/api/habits")
     print("[*] Insights API  : http://127.0.0.1:5000/api/insights/explanations")
+    print("[*] Chat API      : http://127.0.0.1:5000/api/chat")
     print("=" * 60 + "\n")
     app.run(debug=True, host='127.0.0.1', port=5000)
