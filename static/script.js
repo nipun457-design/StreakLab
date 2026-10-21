@@ -614,8 +614,8 @@ function setupEventListeners() {
         // Reset form & close modal
         addHabitForm.reset();
         const modalEl = document.getElementById("addHabitModal");
-        if (modalEl) {
-          const modalInstance = bootstrap.Modal.getInstance(modalEl);
+        if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
+          const modalInstance = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
           if (modalInstance) modalInstance.hide();
         }
 

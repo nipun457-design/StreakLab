@@ -879,6 +879,117 @@ class StreakLabTestCase(unittest.TestCase):
             self.assertEqual(res.status_code, 200)
             mock_urlopen.assert_not_called()
 
+    # -----------------------------------------------------------------------
+    # PHASE 5: SYSTEM POLISH, DATA INTEGRITY & EDGE-CASE VALIDATION
+    # -----------------------------------------------------------------------
+
+    def test_phase5_pending_record_status_and_deletion(self):
+        """Setting status to 'pending' deletes existing record and resets streak calculation."""
+        create_res = self.client.post('/api/habits', json={"name": "Pending Reset Habit", "category": "General"})
+        habit_id = create_res.get_json()['id']
+        today = date.today().isoformat()
+
+        # Step 1: Mark completed
+        res1 = self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "completed"})
+        self.assertEqual(res1.status_code, 201)
+        self.assertEqual(res1.get_json()['streak'], 1)
+
+        # Step 2: Reset to pending
+        res2 = self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "pending"})
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res2.get_json()['status'], 'pending')
+        self.assertEqual(res2.get_json()['streak'], 0)
+
+        # Verify no record exists in database for this date
+        records_res = self.client.get(f'/api/habits/{habit_id}/records')
+        self.assertEqual(len(records_res.get_json()), 0)
+
+    def test_phase5_invalid_record_status_error_message(self):
+        """POST /api/records with an invalid status returns 400 with a descriptive error message."""
+        create_res = self.client.post('/api/habits', json={"name": "Status Test Habit", "category": "General"})
+        habit_id = create_res.get_json()['id']
+        today = date.today().isoformat()
+
+        res = self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "unknown_status"})
+        self.assertEqual(res.status_code, 400)
+        err = res.get_json().get('error', '')
+        self.assertIn("completed", err)
+        self.assertIn("missed", err)
+        self.assertIn("skipped", err)
+        self.assertIn("pending", err)
+
+    def test_phase5_update_habit_partial_and_validation(self):
+        """PUT /api/habits/<id> validates input and supports partial field updates."""
+        create_res = self.client.post('/api/habits', json={
+            "name": "Original Habit",
+            "category": "General",
+            "time_of_day": "Morning",
+            "target_time": "08:00 AM"
+        })
+        habit_id = create_res.get_json()['id']
+
+        # Empty name should fail
+        res_empty = self.client.put(f'/api/habits/{habit_id}', json={"name": "   "})
+        self.assertEqual(res_empty.status_code, 400)
+        self.assertIn('error', res_empty.get_json())
+
+        # Partial update: change only category and target_time
+        res_update = self.client.put(f'/api/habits/{habit_id}', json={
+            "category": "Productivity",
+            "target_time": "09:30 AM"
+        })
+        self.assertEqual(res_update.status_code, 200)
+        updated = res_update.get_json()
+        self.assertEqual(updated['name'], "Original Habit")  # Preserved
+        self.assertEqual(updated['category'], "Productivity")  # Updated
+        self.assertEqual(updated['target_time'], "09:30 AM")  # Updated
+        self.assertEqual(updated['time_of_day'], "Morning")  # Preserved
+
+    def test_phase5_deactivate_habit_preserves_history(self):
+        """DELETE /api/habits/<id> sets active=0 but preserves historical check-ins in SQLite."""
+        create_res = self.client.post('/api/habits', json={"name": "Archive Habit", "category": "Fitness"})
+        habit_id = create_res.get_json()['id']
+        today = date.today()
+
+        # Log check-ins
+        for i in range(3):
+            d = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": habit_id, "record_date": d, "status": "completed"})
+
+        # Deactivate habit
+        del_res = self.client.delete(f'/api/habits/{habit_id}')
+        self.assertEqual(del_res.status_code, 200)
+
+        # GET /api/habits should NOT list deactivated habit
+        active_res = self.client.get('/api/habits')
+        self.assertFalse(any(h['id'] == habit_id for h in active_res.get_json()))
+
+        # GET /api/habits?all=true SHOULD list it with active=0
+        all_res = self.client.get('/api/habits?all=true')
+        archived = next((h for h in all_res.get_json() if h['id'] == habit_id), None)
+        self.assertIsNotNone(archived)
+        self.assertEqual(archived['active'], 0)
+
+        # History records remain intact
+        history_res = self.client.get(f'/api/habits/{habit_id}/records')
+        self.assertEqual(len(history_res.get_json()), 3)
+
+    def test_phase5_insights_explanations_refresh_param(self):
+        """GET /api/insights/explanations?refresh=true successfully forces cache regeneration."""
+        create_res = self.client.post('/api/habits', json={"name": "Refresh Test Habit", "category": "Mindfulness"})
+        habit_id = create_res.get_json()['id']
+        today = date.today().isoformat()
+        self.client.post('/api/records', json={"habit_id": habit_id, "record_date": today, "status": "completed"})
+
+        # Normal request
+        res1 = self.client.get('/api/insights/explanations?days=14')
+        self.assertEqual(res1.status_code, 200)
+
+        # Request with refresh=true
+        res2 = self.client.get('/api/insights/explanations?days=14&refresh=true')
+        self.assertEqual(res2.status_code, 200)
+        self.assertEqual(res2.get_json()['period']['days'], 14)
+
 
 if __name__ == '__main__':
     unittest.main()

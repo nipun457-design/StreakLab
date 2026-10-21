@@ -479,7 +479,7 @@ def save_daily_record():
 
     allowed_statuses = {'completed', 'missed', 'skipped', 'pending'}
     if not status or status not in allowed_statuses:
-        return jsonify({"error": "status must be 'completed', 'missed', or 'skipped'"}), 400
+        return jsonify({"error": "status must be 'completed', 'missed', 'skipped', or 'pending'"}), 400
 
     db = get_db()
     # Check that habit exists
@@ -777,10 +777,11 @@ with app.app_context():
 
 if __name__ == '__main__':
     print("\n" + "=" * 60)
-    print("[*] Starting StreakLab Flask Backend with SQLite (Phase 2B)...")
+    print("[*] Starting StreakLab Flask Backend with SQLite (Phase 5)...")
     print(f"[*] Database Path : {app.config['DATABASE']}")
     print("[*] Dashboard URL  : http://127.0.0.1:5000")
     print("[*] Health API    : http://127.0.0.1:5000/api/health")
     print("[*] Habits API    : http://127.0.0.1:5000/api/habits")
+    print("[*] Insights API  : http://127.0.0.1:5000/api/insights/explanations")
     print("=" * 60 + "\n")
     app.run(debug=True, host='127.0.0.1', port=5000)
