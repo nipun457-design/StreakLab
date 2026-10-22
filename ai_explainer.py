@@ -701,6 +701,19 @@ def get_coach_context(db):
         for p in patterns_summary:
             lines.append(f"- {p['title']}: {p['message']} Tip: {p['recommendation']}")
 
+    # Phase 7: Fetch Goals & Milestones
+    active_goals = []
+    try:
+        goals_data = pattern_engine.calculate_goals_and_milestones(target_date_str=today_str, db=db)
+        active_goals = goals_data.get("goals", [])
+        if active_goals:
+            lines.append("\nActive Weekly Goals & Targets:")
+            for g in active_goals:
+                status_txt = "Achieved! 🎉" if g.get("is_achieved") else f"{g.get('completed_this_week', 0)}/{g.get('target_value', 0)} completed ({g.get('progress_percentage', 0)}%)"
+                lines.append(f"- \"{g['habit_name']}\": Target={g['target_value']} days/week, Status={status_txt}")
+    except Exception:
+        active_goals = []
+
     return {
         "total_habits": len(active_habits),
         "today_completed": today_completed_count,
@@ -708,6 +721,7 @@ def get_coach_context(db):
         "summary_7d": sum_7d,
         "summary_30d": sum_30d,
         "patterns": patterns_summary,
+        "goals": active_goals,
         "text_summary": "\n".join(lines)
     }
 
@@ -741,8 +755,35 @@ def generate_chat_fallback(message, context):
     weakest = habits_by_rate[0] if habits_by_rate else None
     strongest = habits_by_rate[-1] if habits_by_rate else None
 
+    # Intent: Goals and Milestones Tracking (checked before generic week status)
+    if any(k in msg_lower for k in ("goal", "target", "milestone", "achievement")):
+        goals = context.get("goals", [])
+        if goals:
+            goal_items = []
+            for g in goals:
+                if g.get("is_achieved"):
+                    status_badge = f"🎉 **Achieved ({g.get('completed_this_week', 0)}/{g.get('target_value', 0)} days)**"
+                else:
+                    status_badge = f"⏳ **{g.get('completed_this_week', 0)}/{g.get('target_value', 0)} days** ({g.get('progress_percentage', 0)}%) — {g.get('remaining', 0)} left"
+                goal_items.append(f"• **{g['habit_name']}:** Target {g['target_value']} days/week — {status_badge}")
+
+            reply = (
+                f"Here is your weekly goals status:\n\n"
+                + "\n".join(goal_items) +
+                f"\n\nConsistency on each target compounds over time. Keep building!"
+            )
+            evidence = [{"label": "Active Goals", "value": str(len(goals))}]
+        else:
+            reply = (
+                f"You haven't defined any weekly habit targets yet!\n\n"
+                f"Setting a target (e.g. 5 days/week) helps provide a clear focus. "
+                f"You can set a goal for any habit right from the dashboard."
+            )
+            evidence = [{"label": "Active Goals", "value": "0"}]
+        return {"reply": reply, "source": "fallback", "evidence": evidence}
+
     # Intent 1: Weekly Progress / Status / Overview
-    if any(k in msg_lower for k in ("how are", "progress", "going", "summary", "overview", "week", "doing")):
+    elif any(k in msg_lower for k in ("how are", "progress", "going", "summary", "overview", "week", "doing")):
         status_line = f"Today you have completed **{today_completed} of {total_habits}** scheduled habits."
         perf_line = f"Over the past 7 days, your overall completion rate is **{rate_7d}%** ({sum_7d.get('total_completed', 0)} completed, {sum_7d.get('total_missed', 0)} missed, and {sum_7d.get('total_skipped', 0)} rest days)."
 
@@ -765,25 +806,28 @@ def generate_chat_fallback(message, context):
     # Intent 2: Struggling / Weakest / Needs Attention
     elif any(k in msg_lower for k in ("struggl", "attention", "weak", "worst", "falling behind", "hardest", "trouble", "fail", "miss")):
         if weakest and weakest["completion_rate_7d"] < 70:
+            weakest_name = re.sub(r'[;\-\n].*', '', weakest['name']).strip() or weakest['name']
+            strongest_name = re.sub(r'[;\-\n].*', '', strongest['name']).strip() if strongest else 'your morning coffee'
             reply = (
-                f"Based on your check-ins over the past 7 days, **'{weakest['name']}'** needs the most attention.\n\n"
+                f"Based on your check-ins over the past 7 days, **'{weakest_name}'** needs the most attention.\n\n"
                 f"📊 **Current Stats:**\n"
                 f"• 7-Day Completion Rate: **{weakest['completion_rate_7d']}%**\n"
                 f"• Missed Sessions: **{weakest['missed_7d']} days** (Current streak: {weakest['current_streak']} days)\n"
                 f"• Scheduled Time: **{weakest['time_of_day']} ({weakest['target_time']})**\n\n"
                 f"💡 **Coach's Recommendation:**\n"
                 f"1. **Apply the 2-Minute Rule:** Commit to just 2 minutes today to overcome initial resistance.\n"
-                f"2. **Habit Stacking:** Anchor it immediately following your strongest habit ('{strongest['name'] if strongest else 'your morning coffee'}')."
+                f"2. **Habit Stacking:** Anchor it immediately following your strongest habit ('{strongest_name}')."
             )
             evidence = [
-                {"label": "Habit", "value": weakest['name']},
+                {"label": "Habit", "value": weakest_name},
                 {"label": "7-Day Rate", "value": f"{weakest['completion_rate_7d']}%"},
                 {"label": "Missed Days", "value": str(weakest['missed_7d'])}
             ]
         else:
+            weakest_name = re.sub(r'[;\-\n].*', '', weakest['name']).strip() if weakest else 'habits'
             reply = (
                 f"Great news! None of your active habits are currently in danger. All your habits maintain a completion rate of at least 70% this week.\n\n"
-                f"Your lowest performing habit is **'{weakest['name']}'** with a solid **{weakest['completion_rate_7d']}%** execution rate. Maintain your current pace!"
+                f"Your lowest performing habit is **'{weakest_name}'** with a solid **{weakest['completion_rate_7d']}%** execution rate. Maintain your current pace!"
             )
             evidence = [{"label": "Overall 7-Day Rate", "value": f"{rate_7d}%"}]
         return {"reply": reply, "source": "fallback", "evidence": evidence}
@@ -808,8 +852,8 @@ def generate_chat_fallback(message, context):
 
     # Intent 4: Suggestions / Plan to Improve
     elif any(k in msg_lower for k in ("plan", "suggest", "tip", "improve", "advice", "recommend", "how can i", "how to")):
-        anchor_name = strongest['name'] if strongest else "morning routine"
-        target_name = weakest['name'] if weakest else "your daily habit"
+        anchor_name = re.sub(r'[;\-\n].*', '', strongest['name']).strip() if strongest else "morning routine"
+        target_name = re.sub(r'[;\-\n].*', '', weakest['name']).strip() if weakest else "your daily habit"
         reply = (
             f"Here is a 3-step evidence-based plan tailored to your habit data:\n\n"
             f"1. **Anchor Stacking:** Attach **'{target_name}'** directly after **'{anchor_name}'**. Because your anchor has proven consistency, it creates an effortless psychological cue.\n"
@@ -824,7 +868,7 @@ def generate_chat_fallback(message, context):
         return {"reply": reply, "source": "fallback", "evidence": evidence}
 
     # Intent 5: Compare Recent vs Earlier / Trends
-    elif any(k in msg_lower for k in ("compare", "earlier", "past", "history", "previous", "trend", "longer")):
+    elif any(k in msg_lower for k in ("compare", "earlier", "past", "history", "previous", "longer")):
         diff = round(rate_7d - rate_30d, 1)
         if diff > 3:
             trend_str = f"🚀 **Upward Momentum:** Your 7-day rate (**{rate_7d}%**) is **+{diff}%** higher than your 30-day average (**{rate_30d}%**). You are currently building strong positive momentum!"
@@ -846,7 +890,7 @@ def generate_chat_fallback(message, context):
         ]
         return {"reply": reply, "source": "fallback", "evidence": evidence}
 
-    # Intent 6: Greeting
+    # Intent 7: Greeting
     elif any(k in msg_lower for k in ("hi", "hello", "hey", "greetings")):
         reply = (
             f"Hello! I'm your **StreakLab AI Habit Coach**.\n\n"
@@ -863,14 +907,15 @@ def generate_chat_fallback(message, context):
     # Generic / Default fallback
     else:
         top_h = strongest['name'] if strongest else 'habits'
+        top_h_clean = re.sub(r'[;\-\n].*', '', top_h).strip() or "your daily habits"
         reply = (
             f"I reviewed your habit data. You're currently tracking **{total_habits} habits** with an overall 7-day completion rate of **{rate_7d}%**.\n\n"
-            f"Your most consistent habit right now is **'{top_h}'**.\n\n"
+            f"Your most consistent habit right now is **'{top_h_clean}'**.\n\n"
             f"To get the most out of coaching, try asking:\n"
             f"• *'Which habit needs the most attention?'*\n"
             f"• *'What patterns have you detected?'*\n"
             f"• *'Suggest a realistic plan to improve my consistency.'*\n\n"
-            f"*(Running in offline rule-based coaching mode. Add `AI_API_KEY` to `.env` to unlock open-ended AI conversation.)*"
+            f"*(Running in offline rule-based coaching mode. Configure an AI provider in `.env` to unlock open-ended AI conversation.)*"
         )
         evidence = [
             {"label": "7-Day Rate", "value": f"{rate_7d}%"},
@@ -1042,4 +1087,184 @@ def chat_with_coach(message, history, db):
     except Exception as exc:
         logger.warning(f"AI Coach provider failed ({config.get('provider')}): {exc}. Falling back to local coach.")
         return generate_chat_fallback(message, context)
+
+
+# ---------------------------------------------------------------------------
+# PHASE 7: WEEKLY PROGRESS REVIEW AI EXPLANATIONS
+# ---------------------------------------------------------------------------
+
+def explain_weekly_review(review_data):
+    """
+    Phase 7: AI Explanations and Practical Recommendations for Weekly Progress Review.
+    Translates verified weekly statistics into an evidence-grounded coaching summary.
+    Handles 'no_data', 'insufficient_data', and 'sufficient_data' gracefully.
+    Falls back deterministically to local coaching logic when offline or on provider failure.
+    """
+    if not isinstance(review_data, dict):
+        return {
+            "summary": "No weekly data available to evaluate.",
+            "strengths": [],
+            "habits_needing_attention": [],
+            "recommendations": ["Create a habit and log daily check-ins to build consistency."],
+            "source": "fallback",
+            "provider": "local_fallback"
+        }
+
+    data_status = review_data.get("data_status", "no_data")
+    stats = review_data.get("statistics", {})
+
+    # 1. No Data State
+    if data_status == "no_data":
+        return {
+            "summary": "No habit records were found for this 7-day period. Consistent daily tracking is the first step toward lasting habits.",
+            "strengths": [],
+            "habits_needing_attention": [],
+            "recommendations": [
+                "Log your first check-in today to establish a baseline.",
+                "Pick one keystone habit and set a specific target time to kick off your routine."
+            ],
+            "source": "fallback",
+            "provider": "local_fallback"
+        }
+
+    # 2. Insufficient Data State (< 3 records)
+    if data_status == "insufficient_data":
+        tot_records = stats.get("total_records", 0)
+        strong_days = review_data.get("strongest_recorded_days", [])
+        day_strs = [f"{d['day_name']} ({d['completed']} completed)" for d in strong_days if d.get("completed", 0) > 0]
+
+        strengths = [f"Logged check-ins on: {', '.join(day_strs)}."] if day_strs else []
+        return {
+            "summary": f"You logged {tot_records} check-in{'s' if tot_records != 1 else ''} this week. At least 3 daily check-ins are required to establish reliable weekly trends without speculation.",
+            "strengths": strengths,
+            "habits_needing_attention": [],
+            "recommendations": [
+                "Aim for at least 3-5 check-ins this upcoming week to unlock full statistical coaching.",
+                "Anchor your habits to an existing routine (e.g. right after morning coffee)."
+            ],
+            "source": "fallback",
+            "provider": "local_fallback"
+        }
+
+    # 3. Sufficient Data State: Deterministic Fallback Builder
+    def _build_deterministic_weekly_fallback():
+        rate = stats.get("completion_rate", 0.0)
+        prev_rate = stats.get("previous_completion_rate", 0.0)
+        diff = stats.get("rate_diff", 0.0)
+        trend = stats.get("trend", "steady")
+        c_count = stats.get("completed", 0)
+        m_count = stats.get("missed", 0)
+
+        if trend == "improved":
+            trend_str = f"up +{diff}% compared to the prior week ({prev_rate}%)"
+        elif trend == "declined":
+            trend_str = f"down {diff}% compared to the prior week ({prev_rate}%)"
+        elif trend == "baseline":
+            trend_str = "establishing your baseline pace"
+        else:
+            trend_str = f"steady at {rate}%, matching last week's consistency"
+
+        summary = (
+            f"You completed {c_count} check-ins this week with an overall completion rate of {rate}%, "
+            f"{trend_str}."
+        )
+
+        strengths = []
+        for d in review_data.get("strongest_recorded_days", [])[:2]:
+            if d.get("completed", 0) > 0:
+                strengths.append(f"{d['day_name']} was a top day with {d['completed']} completed habit{'s' if d['completed'] > 1 else ''} ({d['rate']}% completion).")
+        for h in review_data.get("strongest_habits", [])[:2]:
+            strengths.append(f"'{h['name']}' demonstrated high reliability ({h['rate']}% completion rate, {h.get('streak', 0)}-day active streak).")
+
+        attention = []
+        for h in review_data.get("habits_needing_attention", [])[:2]:
+            attention.append(f"'{h['name']}' experienced {h['missed']} missed day{'s' if h['missed'] > 1 else ''} ({h['rate']}% completion).")
+
+        recommendations = []
+        if attention:
+            first_attn = review_data.get("habits_needing_attention", [])[0]["name"]
+            recommendations.append(f"Lower the barrier for '{first_attn}': commit to just 5 minutes to restore daily momentum.")
+        if review_data.get("weakest_recorded_days"):
+            drop_day = review_data["weakest_recorded_days"][0]["day_name"]
+            recommendations.append(f"Protect your routine on {drop_day}s by preparing materials or cues the evening prior.")
+        recommendations.append("Continue stacking habits to preserve current positive momentum into next week.")
+
+        return {
+            "summary": summary,
+            "strengths": strengths,
+            "habits_needing_attention": attention,
+            "recommendations": recommendations,
+            "source": "fallback",
+            "provider": "local_fallback"
+        }
+
+    fallback_result = _build_deterministic_weekly_fallback()
+
+    # Attempt AI explanation if configured
+    config = get_ai_config()
+    if not config["is_configured"]:
+        return fallback_result
+
+    try:
+        # Prompt construction
+        evidence_payload = {
+            "period": f"{review_data['period']['start_date']} to {review_data['period']['end_date']}",
+            "completion_rate": f"{stats.get('completion_rate', 0.0)}%",
+            "completed": stats.get("completed", 0),
+            "missed": stats.get("missed", 0),
+            "skipped": stats.get("skipped", 0),
+            "previous_completion_rate": f"{stats.get('previous_completion_rate', 0.0)}%",
+            "trend": stats.get("trend", "steady"),
+            "rate_diff": f"{stats.get('rate_diff', 0.0)}%",
+            "strongest_days": [f"{d['day_name']} ({d['rate']}%)" for d in review_data.get("strongest_recorded_days", [])],
+            "habits_needing_attention": [f"{h['name']} ({h['missed']} misses, {h['rate']}%)" for h in review_data.get("habits_needing_attention", [])],
+            "strongest_habits": [f"{h['name']} ({h['rate']}%)" for h in review_data.get("strongest_habits", [])]
+        }
+
+        system_instruction = (
+            "You are the StreakLab AI Habit Coach. Analyze the following verified weekly habit records and generate a structured review.\n"
+            "CRITICAL RULES:\n"
+            "1. Ground all feedback strictly in the supplied figures. Never invent numbers, streaks, or dates.\n"
+            "2. Keep the tone encouraging, objective, and solution-focused. Avoid shame or clinical diagnoses.\n"
+            "3. Output MUST be valid JSON with this exact schema:\n"
+            "{\n"
+            '  "summary": "Concise 1-2 sentence overview of the week\'s progress and trend.",\n'
+            '  "strengths": ["1-2 concise points on strongest days and top habits."],\n'
+            '  "habits_needing_attention": ["1-2 factual points on habits with missed days."],\n'
+            '  "recommendations": ["2-3 practical, realistic action steps for next week."]\n'
+            "}"
+        )
+
+        user_content = f"VERIFIED WEEKLY HABIT RECORDS:\n{json.dumps(evidence_payload, indent=2)}"
+
+        ai_raw_output = None
+        if config["provider"] == "gemini":
+            combined_prompt = f"{system_instruction}\n\n{user_content}"
+            ai_raw_output = _call_gemini_api(config, combined_prompt)
+        elif config["provider"] == "openai":
+            ai_raw_output = _call_openai_api(config, system_instruction, user_content)
+
+        if isinstance(ai_raw_output, dict):
+            summary = str(ai_raw_output.get("summary", "")).strip()
+            strengths = ai_raw_output.get("strengths", [])
+            attention = ai_raw_output.get("habits_needing_attention", [])
+            recs = ai_raw_output.get("recommendations", [])
+
+            if summary and len(summary) > 10 and isinstance(recs, list) and len(recs) > 0:
+                return {
+                    "summary": summary[:600],
+                    "strengths": [str(s)[:300] for s in strengths if isinstance(s, str)][:3] or fallback_result["strengths"],
+                    "habits_needing_attention": [str(a)[:300] for a in attention if isinstance(a, str)][:3] or fallback_result["habits_needing_attention"],
+                    "recommendations": [str(r)[:300] for r in recs if isinstance(r, str)][:4] or fallback_result["recommendations"],
+                    "source": "ai",
+                    "provider": config["provider"]
+                }
+
+        logger.warning("AI weekly review returned invalid JSON; using local fallback.")
+        return fallback_result
+
+    except Exception as exc:
+        logger.warning(f"AI weekly review provider failed ({config.get('provider')}): {exc}. Using local fallback.")
+        return fallback_result
+
 

@@ -13,7 +13,7 @@ StreakLab employs **100% isolated, deterministic automated testing**:
 
 ---
 
-## 2. Test Suite Breakdown (63 Automated Tests)
+## 2. Test Suite Breakdown (75 Automated Tests)
 
 | Category | Count | Focus Areas |
 | :--- | :---: | :--- |
@@ -26,7 +26,8 @@ StreakLab employs **100% isolated, deterministic automated testing**:
 | **Cache & Performance** | 3 | In-memory cache hit, mutation-triggered invalidation, `refresh=true` query flag |
 | **Security & Safety** | 3 | Prompt injection sanitization, zero external calls offline, secrets containment |
 | **Phase 6: Real AI Habit Coach Chat** | 17 | Valid chat mock, empty/missing message, malformed JSON, non-string types, length bounds, history validation, no-key fallback, timeout fallback, 30 req/min rate limit, provider error fallback, invalid provider response, intent coverage, source labeling (`ai` vs `fallback`), evidence grounding, zero habits handling, injection defense, secrets leakage containment |
-| **Total** | **63** | **All 63 tests passing with 0 failures** |
+| **Phase 7: Smart Progress & Goal Tracking** | 12 | Calendar heatmap month grid, habit filter, future/today boundary indicators, invalid month/habit validation, weekly review empty/insufficient data (<3 records anti-fabrication), sufficient data trend calculation, mocked AI weekly review explanation, goals CRUD validation, milestone achievement detection, duplicate milestone notification suppression via unique constraint, milestone acknowledgment endpoint, AI coach goals querying |
+| **Total** | **75** | **All 75 tests passing with 0 failures** |
 
 ---
 
@@ -34,7 +35,7 @@ StreakLab employs **100% isolated, deterministic automated testing**:
 
 ### Command:
 ```powershell
-.\.venv\Scripts\python.exe test_app.py
+.\.venv\Scripts\python.exe -m unittest test_app.py
 ```
 
 ### Actual Output:
@@ -45,15 +46,15 @@ StreakLab employs **100% isolated, deterministic automated testing**:
 ....AI Coach provider failed (gemini): URLError: Failed connecting with key AI_KEY_VERY_SECRET_DO_NOT_REVEAL_XYZ123. Falling back to local coach.
 ....AI Coach provider failed (gemini): Connection timed out. Falling back to local coach.
 .AI Coach provider failed (gemini): Gemini API returned HTTP 500. Falling back to local coach.
-............
+........................
 ----------------------------------------------------------------------
-Ran 63 tests in 2.227s
+Ran 75 tests in 5.294s
 
 OK
 ```
 
 > **Note on Console Warnings during Test Runs:**
-> The two log messages printed during testing (`AI provider returned invalid non-list response` and `AI provider failed: Connection timed out`) are **deliberately induced** by the test suite to verify that provider errors are handled gracefully without crashing the app or surfacing HTTP 500 errors.
+> The log messages printed during testing (`AI provider returned invalid non-list response`, `AI provider failed: Connection timed out`, etc.) are **deliberately induced** by the test suite to verify that provider errors, timeouts, and rate limits are handled gracefully without crashing the app or surfacing HTTP 500 errors.
 
 ---
 

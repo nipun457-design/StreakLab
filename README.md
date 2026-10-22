@@ -31,7 +31,7 @@ StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based 
 | **Database** | SQLite 3 (`instance/streaklab.db`) | ACID persistence, foreign key enforcement (`PRAGMA foreign_keys = ON`), UPSERT conflict handling, indices |
 | **Statistical Engine** | Python (`pattern_engine.py`) | **Source of Truth**: Best streaks, active completion rates, weekday drop-offs, peak days, consecutive misses |
 | **AI Habit Coach** | Python (`ai_explainer.py`), Google Gemini / OpenAI APIs | Conversational habit coaching grounded in SQLite data, prompt injection defense, sliding-window IP rate limiter, deterministic offline fallback |
-| **Automated Testing**  | Python `unittest`, `unittest.mock` (`test_app.py`) | 63 isolated automated unit and integration tests using temporary SQLite databases (100% mocked AI) |
+| **Automated Testing**  | Python `unittest`, `unittest.mock` (`test_app.py`) | 75 isolated automated unit and integration tests using temporary SQLite databases (100% mocked AI) |
 
 ---
 
@@ -317,6 +317,19 @@ AI_TIMEOUT=6
 
 ---
 
+### 5. Smart Progress & Goal Tracking (Phase 7)
+
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/api/calendar` | Habit Calendar Heatmap with day-by-day status (`completed`, `partial`, `missed`, `skipped`, `unrecorded`, `future`, `today`). Supports `?month=YYYY-MM` and `?habit_id=<id>`. |
+| `GET` | `/api/reviews/weekly` | Structured weekly progress review: completion stats, comparison to previous week, trend, top recorded days, habits needing attention, and AI Coach explanation. Supports `?date=YYYY-MM-DD`. |
+| `GET` | `/api/goals` | Retrieve all active habit goals and weekly target progress. |
+| `POST` | `/api/goals` | Set or update a weekly completion target (1–7 days/week) for a habit (`{"habit_id": 1, "target_value": 5}`). |
+| `DELETE` | `/api/goals/<id>` | Deactivate a habit goal target. |
+| `POST` | `/api/milestones/acknowledge` | Acknowledge and dismiss an achieved milestone banner (`{"milestone_id": 1}`). |
+
+---
+
 ## 🖥️ How to Run and Test Locally (Windows PowerShell)
 
 ### Step 1: Open PowerShell in Project Folder
@@ -339,9 +352,9 @@ $env:AI_MODEL="gemini-1.5-flash"
 
 > **Security Note**: Never commit `.env` or paste your API key in Git-tracked files. `.env` is permanently excluded via `.gitignore`.
 
-### Step 3: Run the Complete Automated Test Suite (63 Tests)
+### Step 3: Run the Complete Automated Test Suite (75 Tests)
 ```powershell
-.\.venv\Scripts\python.exe test_app.py
+.\.venv\Scripts\python.exe -m unittest test_app.py
 ```
 **Actual Output**:
 ```text
@@ -351,9 +364,9 @@ $env:AI_MODEL="gemini-1.5-flash"
 ....AI Coach provider failed (gemini): URLError: Failed connecting with key AI_KEY_VERY_SECRET_DO_NOT_REVEAL_XYZ123. Falling back to local coach.
 ....AI Coach provider failed (gemini): Connection timed out. Falling back to local coach.
 .AI Coach provider failed (gemini): Gemini API returned HTTP 500. Falling back to local coach.
-............
+........................
 ----------------------------------------------------------------------
-Ran 63 tests in 2.227s
+Ran 75 tests in 5.294s
 
 OK
 ```
@@ -365,32 +378,39 @@ OK
 **Console Output**:
 ```text
 ============================================================
-[*] Starting StreakLab Flask Backend with SQLite (Phase 6)...
+[*] Starting StreakLab Flask Backend with SQLite (Phase 7)...
 [*] Database Path : C:\Users\nipun\OneDrive\Desktop\StreakLab\instance\streaklab.db
 [*] Dashboard URL  : http://127.0.0.1:5000
 [*] Health API    : http://127.0.0.1:5000/api/health
 [*] Habits API    : http://127.0.0.1:5000/api/habits
 [*] Insights API  : http://127.0.0.1:5000/api/insights/explanations
 [*] Chat API      : http://127.0.0.1:5000/api/chat
+[*] Calendar API  : http://127.0.0.1:5000/api/calendar
+[*] Weekly Review : http://127.0.0.1:5000/api/reviews/weekly
+[*] Goals API     : http://127.0.0.1:5000/api/goals
 ============================================================
  * Serving Flask app 'app'
  * Debug mode: on
  * Running on http://127.0.0.1:5000
 ```
 
-### Step 5: Explore the AI Habit Coach in Your Browser
-1. Open **`http://127.0.0.1:5000`** in any modern web browser.
-2. Look at the bottom-right corner for the **floating AI Habit Coach button** (pulsing badge).
-3. Click the launcher button to open the responsive chatbox drawer.
-4. Try clicking any of the suggested question chips:
-   - *"How are my habits going this week?"*
-   - *"Which habit needs the most attention?"*
-   - *"What patterns have you detected in my routine?"*
-   - *"Suggest a realistic plan to improve my consistency."*
-   - *"Compare my recent performance with my earlier records."*
-5. Type custom questions and press **Enter** (or Shift+Enter for new line).
-6. Notice the typing indicator, grounded evidence chips, and `AI Powered` or `Fallback Coach` badges.
-7. Click the **↺** clear button in the chat header to reset conversation history.
+### Step 5: Explore the Phase 7 Smart Progress & Goal Tracking Features
+1. Open **`http://127.0.0.1:5000`** in your browser.
+2. Scroll to the **Smart Progress & Goal Tracking (Phase 7)** section:
+   - **Habit Calendar Heatmap**:
+     - Browse months with **Prev / Next** buttons or select a specific habit filter.
+     - Inspect color-coded days: green (completed), yellow (partial), red (missed), purple (skipped), gray (unrecorded/future).
+     - Click any past or current day cell to open the **Date Inspection Modal** displaying actual SQLite check-in records for all habits.
+   - **Weekly Progress Review**:
+     - View 7-day completion rates, previous week comparison, strongest days, and habits needing attention.
+     - Read the grounded AI Coach summary with practical recommendations.
+     - Click **"Ask AI Coach to explain this review"** to immediately open the AI Coach Chatbox focused on the weekly review.
+   - **Goals and Milestones**:
+     - Click **+ Set Habit Goal** to assign a weekly target (e.g. 5 days/week) to any habit.
+     - Track live progress bars (e.g. `4/5 days (80%)`).
+     - Celebrate milestones when targets or streaks are achieved; dismiss banners with a single click.
+3. Chat with the **AI Habit Coach**:
+   - Ask *"What are my habit goals this week?"* to see your active targets and progress.
 
 ---
 
@@ -405,9 +425,9 @@ OK
 
 ## 📚 Supplementary Documentation
 
-* **[Architecture Document](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/ARCHITECTURE.md)**: System flow diagrams, component boundaries, chat sequence, and security model.
-* **[Testing Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/TESTING.md)**: Full test matrix (63 test cases), isolation details, and manual verification checklist.
-* **[Demo Presentation Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/DEMO_GUIDE.md)**: Step-by-step 5-minute live demonstration script including the AI Chatbox.
+* **[Architecture Document](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/ARCHITECTURE.md)**: System flow diagrams, component boundaries, schema tables (`habit_goals`, `goal_milestones`), and security model.
+* **[Testing Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/TESTING.md)**: Full test matrix (75 test cases), isolation details, and manual verification checklist.
+* **[Demo Presentation Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/DEMO_GUIDE.md)**: Step-by-step 5-minute live demonstration script including the AI Chatbox and Phase 7 features.
 
 ---
 
@@ -420,3 +440,4 @@ OK
 - [x] **Phase 4**: Hybrid AI explanation and recommendation engine (`ai_explainer.py`), Gemini and OpenAI integrations, local deterministic fallback, in-memory cache with mutation invalidation, and `/api/insights/explanations`.
 - [x] **Phase 5**: Final Polish, Edge-Case Verification, Expanded Test Suite, Comprehensive Documentation (`docs/`), and Submission Preparation.
 - [x] **Phase 6**: Real AI Habit Coach Chatbox (`/api/chat`), floating frontend chatbox with suggestion chips, DOM-safe rendering, evidence grounding, sliding-window rate limiting, and 17 automated mock-isolated test scenarios.
+- [x] **Phase 7**: Smart Progress and Goal Tracking (`/api/calendar`, `/api/reviews/weekly`, `/api/goals`, `/api/milestones/acknowledge`), Habit Calendar Heatmap with date inspection modal, Weekly Progress Review with grounded AI explanations, and Weekly Target Goals with duplicate-prevented milestone notifications.

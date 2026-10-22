@@ -36,7 +36,7 @@
           <span class="brand-text">Streak<span class="brand-text-accent">Lab</span></span>
           <span class="brand-subtext">Habit Pattern Detector</span>
         </div>
-        <span class="badge bg-indigo-subtle text-indigo border border-indigo-subtle ms-2 rounded-pill d-none d-sm-inline-block">Phase 5 • Hybrid AI &amp; Analytics</span>
+        <span class="badge bg-indigo-subtle text-indigo border border-indigo-subtle ms-2 rounded-pill d-none d-sm-inline-block">Phase 7 • Smart Progress &amp; Goals</span>
       </a>
 
       <!-- Navbar Right Controls -->
@@ -369,6 +369,171 @@
         </div>
       </div>
     </div>
+
+    <!-- ================================================================= -->
+    <!-- PHASE 7: SMART PROGRESS & GOAL TRACKING                           -->
+    <!-- ================================================================= -->
+    <section class="mt-4 mb-4" id="phase7Section">
+      
+      <!-- Section Header -->
+      <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+          <div class="brand-icon-wrapper" style="width: 34px; height: 34px; font-size: 1rem; border-radius: 9px;">
+            <i class="bi bi-calendar-check text-white"></i>
+          </div>
+          <div>
+            <h2 class="h5 fw-bold mb-0 text-dark">Smart Progress &amp; Goal Tracking</h2>
+            <p class="text-muted small mb-0">Habit calendar heatmap, weekly progress review, and target milestones.</p>
+          </div>
+        </div>
+        <span class="badge bg-purple-subtle text-purple border border-purple-subtle rounded-pill px-3 py-2 small fw-semibold">
+          <i class="bi bi-stars me-1"></i>Phase 7 Active
+        </span>
+      </div>
+
+      <div class="row g-4">
+        <!-- 1. HABIT CALENDAR HEATMAP (LEFT COLUMN, 7 COLS) -->
+        <div class="col-12 col-xl-7">
+          <div class="card border-0 shadow-sm rounded-4 h-100" id="calendarHeatmapCard">
+            <div class="card-header bg-transparent border-0 pt-4 px-4 pb-2">
+              <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-3">
+                <div>
+                  <h3 class="h6 fw-bold mb-1 d-flex align-items-center gap-2">
+                    <i class="bi bi-calendar3-range-fill text-primary"></i>
+                    Habit Calendar Heatmap
+                  </h3>
+                  <p class="text-muted small mb-0">Daily visual activity from actual SQLite records</p>
+                </div>
+
+                <div class="d-flex align-items-center gap-2 flex-wrap">
+                  <!-- Habit Filter Selector -->
+                  <select id="calendarHabitSelect" class="form-select form-select-sm rounded-pill border shadow-sm small py-1 px-2" style="font-size: 0.78rem;" aria-label="Filter Calendar by Habit">
+                    <option value="" selected>All Active Habits</option>
+                  </select>
+
+                  <!-- Month Navigator Buttons -->
+                  <div class="btn-group btn-group-sm rounded-pill border shadow-sm overflow-hidden" role="group" aria-label="Month Navigation">
+                    <button type="button" class="btn btn-light btn-sm px-2 py-1" id="calendarPrevMonthBtn" title="Previous Month" aria-label="Previous Month">
+                      <i class="bi bi-chevron-left"></i>
+                    </button>
+                    <button type="button" class="btn btn-light btn-sm px-3 py-1 fw-bold text-nowrap" id="calendarMonthLabel" title="Go to current month" aria-label="Current Month">
+                      Loading...
+                    </button>
+                    <button type="button" class="btn btn-light btn-sm px-2 py-1" id="calendarNextMonthBtn" title="Next Month" aria-label="Next Month">
+                      <i class="bi bi-chevron-right"></i>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-body px-4 py-3">
+              <!-- Calendar Weekday Header & Grid Container -->
+              <div class="calendar-wrapper">
+                <!-- Day of Week Headers -->
+                <div class="calendar-grid-header mb-2" role="row">
+                  <div class="calendar-weekday-title" role="columnheader">Mon</div>
+                  <div class="calendar-weekday-title" role="columnheader">Tue</div>
+                  <div class="calendar-weekday-title" role="columnheader">Wed</div>
+                  <div class="calendar-weekday-title" role="columnheader">Thu</div>
+                  <div class="calendar-weekday-title" role="columnheader">Fri</div>
+                  <div class="calendar-weekday-title text-primary" role="columnheader">Sat</div>
+                  <div class="calendar-weekday-title text-primary" role="columnheader">Sun</div>
+                </div>
+
+                <!-- Days Heatmap Grid -->
+                <div id="calendarGrid" class="calendar-grid" role="grid" aria-label="Habit activity heatmap">
+                  <!-- Generated dynamically by script.js -->
+                </div>
+              </div>
+
+              <!-- Accessible Legend -->
+              <div class="heatmap-legend d-flex flex-wrap align-items-center justify-content-between gap-2 p-2 px-3 rounded-3 bg-light mt-3 small text-muted">
+                <span class="fw-semibold text-dark">Legend:</span>
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                  <span class="d-inline-flex align-items-center gap-1">
+                    <span class="legend-cell bg-heatmap-completed"></span> Completed
+                  </span>
+                  <span class="d-inline-flex align-items-center gap-1">
+                    <span class="legend-cell bg-heatmap-partial"></span> Partial / Mixed
+                  </span>
+                  <span class="d-inline-flex align-items-center gap-1">
+                    <span class="legend-cell bg-heatmap-missed"></span> Missed
+                  </span>
+                  <span class="d-inline-flex align-items-center gap-1">
+                    <span class="legend-cell bg-heatmap-skipped"></span> Skipped
+                  </span>
+                  <span class="d-inline-flex align-items-center gap-1">
+                    <span class="legend-cell bg-heatmap-unrecorded"></span> Unrecorded
+                  </span>
+                </div>
+                <small class="text-muted d-none d-md-inline">Click any date to inspect details</small>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. RIGHT COLUMN (5 COLS): WEEKLY REVIEW & GOALS -->
+        <div class="col-12 col-xl-5">
+          <div class="d-flex flex-column gap-4">
+
+            <!-- WEEKLY PROGRESS REVIEW CARD -->
+            <div class="card border-0 shadow-sm rounded-4" id="weeklyReviewCard">
+              <div class="card-header bg-transparent border-0 pt-4 px-4 pb-0 d-flex justify-content-between align-items-center">
+                <div>
+                  <h3 class="h6 fw-bold mb-1 d-flex align-items-center gap-2">
+                    <i class="bi bi-graph-up-arrow text-indigo"></i>
+                    Weekly Progress Review
+                  </h3>
+                  <p class="text-muted small mb-0" id="weeklyReviewPeriodLabel">Past 7 days review</p>
+                </div>
+                <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1" id="btnRefreshWeeklyReview" title="Refresh Review">
+                  <i class="bi bi-arrow-clockwise me-1"></i>Refresh
+                </button>
+              </div>
+
+              <div class="card-body px-4 pb-4 pt-3">
+                <div id="weeklyReviewContent">
+                  <!-- Rendered dynamically by script.js -->
+                  <div class="text-center py-4 text-muted small">
+                    <div class="spinner-border spinner-border-sm text-primary mb-2" role="status"></div>
+                    <div>Loading weekly review...</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- GOALS & MILESTONES CARD -->
+            <div class="card border-0 shadow-sm rounded-4" id="goalsMilestonesCard">
+              <div class="card-header bg-transparent border-0 pt-4 px-4 pb-0 d-flex justify-content-between align-items-center">
+                <div>
+                  <h3 class="h6 fw-bold mb-1 d-flex align-items-center gap-2">
+                    <i class="bi bi-bullseye text-orange"></i>
+                    Goals &amp; Milestones
+                  </h3>
+                  <p class="text-muted small mb-0">Set weekly completion targets and track milestones</p>
+                </div>
+                <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-1 d-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#setGoalModal" id="btnOpenSetGoal">
+                  <i class="bi bi-plus-circle"></i>
+                  <span>Set Goal</span>
+                </button>
+              </div>
+
+              <div class="card-body px-4 pb-4 pt-3">
+                <!-- Milestone Celebration Alert Container -->
+                <div id="milestoneAlertContainer" class="mb-3"></div>
+
+                <!-- Goals List Container -->
+                <div id="goalsListContainer" class="d-flex flex-column gap-3">
+                  <!-- Rendered dynamically by script.js -->
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <!-- ================================================================= -->
@@ -460,6 +625,89 @@
           </div>
         </form>
 
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- MODAL: INSPECT DATE HABIT RECORDS (PHASE 7)                       -->
+  <!-- ================================================================= -->
+  <div class="modal fade" id="dateInspectionModal" tabindex="-1" aria-labelledby="dateInspectionModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header border-0 pb-0 pt-4 px-4">
+          <div class="d-flex align-items-center gap-2">
+            <div class="modal-header-icon bg-indigo-subtle text-indigo">
+              <i class="bi bi-calendar-event"></i>
+            </div>
+            <div>
+              <h5 class="modal-title fw-bold" id="dateInspectionModalLabel">Date Details</h5>
+              <p class="text-muted small mb-0" id="dateInspectionSubLabel">Habit check-ins for this date</p>
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body px-4 py-3">
+          <div id="dateInspectionRecordsContainer" class="d-flex flex-column gap-2">
+            <!-- Rendered dynamically -->
+          </div>
+        </div>
+        <div class="modal-footer border-0 px-4 pb-4 pt-2">
+          <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================================================================= -->
+  <!-- MODAL: SET WEEKLY TARGET / GOAL (PHASE 7)                         -->
+  <!-- ================================================================= -->
+  <div class="modal fade" id="setGoalModal" tabindex="-1" aria-labelledby="setGoalModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-centered">
+      <div class="modal-content border-0 shadow-lg rounded-4">
+        <div class="modal-header border-0 pb-0 pt-4 px-4">
+          <div class="d-flex align-items-center gap-2">
+            <div class="modal-header-icon bg-orange-subtle text-orange">
+              <i class="bi bi-bullseye"></i>
+            </div>
+            <div>
+              <h5 class="modal-title fw-bold" id="setGoalModalLabel">Set Weekly Habit Target</h5>
+              <p class="text-muted small mb-0">Define target completion days per week.</p>
+            </div>
+          </div>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+
+        <form id="setGoalForm" novalidate>
+          <div class="modal-body px-4 py-3">
+            <!-- Habit Selection -->
+            <div class="mb-3">
+              <label for="goalHabitSelect" class="form-label fw-semibold small">Choose Habit <span class="text-danger">*</span></label>
+              <select class="form-select" id="goalHabitSelect" required>
+                <!-- Populated dynamically -->
+              </select>
+              <div class="invalid-feedback">Please select a habit.</div>
+            </div>
+
+            <!-- Target Days Per Week -->
+            <div class="mb-3">
+              <label for="goalTargetValueRange" class="form-label fw-semibold small">Target Completions / Week <span class="text-danger">*</span></label>
+              <div class="d-flex align-items-center gap-3">
+                <input type="range" class="form-range flex-grow-1" min="1" max="7" step="1" id="goalTargetValueRange" value="5">
+                <span id="goalTargetValueDisplay" class="badge bg-primary fs-6 px-3 py-2 rounded-pill">5 days</span>
+              </div>
+              <small class="text-muted">Target between 1 and 7 days every week (Mon – Sun).</small>
+            </div>
+          </div>
+
+          <div class="modal-footer border-0 px-4 pb-4 pt-2">
+            <button type="button" class="btn btn-light rounded-pill px-4" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary rounded-pill px-4 d-flex align-items-center gap-2" id="btnSaveGoal">
+              <i class="bi bi-check-lg"></i>
+              Save Target
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

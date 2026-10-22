@@ -861,3 +861,219 @@ h1, h2, h3, h4, .brand-text {
     height: 52px;
   }
 }
+
+/* ==========================================================================
+   PHASE 7: SMART PROGRESS & GOAL TRACKING STYLES
+   ========================================================================== */
+
+/* Calendar Heatmap Container & Grid */
+.calendar-wrapper {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 8px 0;
+}
+
+.calendar-grid-header {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  text-align: center;
+}
+
+.calendar-weekday-title {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  padding: 4px 0;
+}
+
+.calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+}
+
+/* Calendar Day Cell */
+.calendar-cell {
+  position: relative;
+  min-height: 48px;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  border: 1px solid transparent;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+  user-select: none;
+  cursor: pointer;
+}
+
+.calendar-cell:hover:not(.cell-future) {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+  z-index: 2;
+}
+
+.calendar-cell:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+  z-index: 3;
+}
+
+/* Cell Status Variants */
+.cell-completed {
+  background: #10b981;
+  color: #ffffff;
+  border-color: #059669;
+}
+
+.cell-partial {
+  background: #8b5cf6;
+  color: #ffffff;
+  border-color: #7c3aed;
+}
+
+.cell-missed {
+  background: #ef4444;
+  color: #ffffff;
+  border-color: #dc2626;
+}
+
+.cell-skipped {
+  background: #f59e0b;
+  color: #ffffff;
+  border-color: #d97706;
+}
+
+.cell-unrecorded {
+  background: #f8fafc;
+  color: #64748b;
+  border: 1px dashed #cbd5e1;
+}
+
+.cell-future {
+  background: #f8fafc;
+  color: #cbd5e1;
+  border: 1px solid #f1f5f9;
+  cursor: default;
+  opacity: 0.6;
+}
+
+.cell-today {
+  box-shadow: 0 0 0 2px var(--primary), 0 2px 6px rgba(79, 70, 229, 0.3) !important;
+  font-weight: 800;
+}
+
+.cell-day-num {
+  font-size: 0.85rem;
+  line-height: 1;
+}
+
+.cell-sub-indicator {
+  font-size: 0.62rem;
+  line-height: 1;
+  margin-top: 3px;
+  opacity: 0.9;
+}
+
+/* Heatmap Legend Markers */
+.legend-cell {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.bg-heatmap-completed { background: #10b981; }
+.bg-heatmap-partial { background: #8b5cf6; }
+.bg-heatmap-missed { background: #ef4444; }
+.bg-heatmap-skipped { background: #f59e0b; }
+.bg-heatmap-unrecorded { background: #f1f5f9; border: 1px dashed #cbd5e1; }
+
+/* Weekly Progress Review Styles */
+.weekly-kpi-box {
+  background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
+  border: 1px solid #e0e7ff;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.day-badge-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  background: #fff7ed;
+  color: #c2410c;
+  border: 1px solid #ffedd5;
+}
+
+.coach-review-box {
+  background: #faf5ff;
+  border: 1px solid #f3e8ff;
+  border-radius: 12px;
+  padding: 14px;
+}
+
+/* Goals & Milestones Styles */
+.goal-card {
+  background: #ffffff;
+  border: 1px solid var(--surface-border);
+  border-radius: 12px;
+  padding: 14px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.goal-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.goal-card.goal-achieved {
+  border-color: #a7f3d0;
+  background: linear-gradient(135deg, #ffffff 0%, #ecfdf5 100%);
+}
+
+.goal-progress-bar {
+  height: 8px;
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
+.milestone-banner {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border: 1px solid #fcd34d;
+  color: #78350f;
+  border-radius: 12px;
+  padding: 12px 16px;
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 576px) {
+  .calendar-cell {
+    min-height: 40px;
+    font-size: 0.75rem;
+    padding: 2px;
+  }
+  .cell-day-num {
+    font-size: 0.75rem;
+  }
+  .cell-sub-indicator {
+    display: none;
+  }
+}
+

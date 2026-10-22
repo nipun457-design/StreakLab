@@ -69,7 +69,10 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
 * **Schema**:
   * `habits`: `id` (PK), `name`, `description`, `category`, `time_of_day`, `target_time`, `target_frequency`, `created_at`, `active`.
   * `habit_records`: `id` (PK), `habit_id` (FK -> habits.id ON DELETE CASCADE), `record_date`, `status` (`completed`, `missed`, `skipped`), `created_at`, `updated_at`.
-  * `indices`: `idx_records_habit_date` on `(habit_id, record_date)`, `idx_records_date` on `(record_date)`.
+  * `habit_goals` (Phase 7): `id` (PK), `habit_id` (FK -> habits.id ON DELETE CASCADE), `target_type` ('weekly_frequency'), `target_value` (1-7), `start_date`, `active`, `created_at`, `updated_at`.
+  * `goal_milestones` (Phase 7): `id` (PK), `goal_id` (FK -> habit_goals.id ON DELETE CASCADE), `habit_id` (FK -> habits.id ON DELETE CASCADE), `milestone_type` ('target_reached', 'streak_3', 'streak_7', 'streak_14', 'streak_30'), `milestone_period` (e.g. '2026-W43'), `achieved_at`, `notified`, `created_at`.
+    - **Constraint**: `UNIQUE(habit_id, milestone_type, milestone_period)` guarantees duplicate notifications are physically prevented at the database level.
+  * `indices`: `idx_records_habit_date`, `idx_records_date`, `idx_goals_habit`, `idx_milestones_habit_period`.
 
 ### Component 4: Rule-Based Statistical Pattern Engine
 * **File**: `pattern_engine.py`
@@ -78,16 +81,20 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
   * Calculates best streaks, consecutive misses, day-of-week drop-offs, and time-of-day variations.
   * Strictly excludes future records and guards against division-by-zero.
   * Assigns qualitative confidence levels (`low`, `medium`, `high`) based on sample sizes.
+  * **Phase 7 Calendar Heatmap (`get_calendar_heatmap`)**: Computes day-by-day status breakdown (`completed`, `partial`, `missed`, `skipped`, `unrecorded`, `future`, `today`), percentage completion, and day inspection details.
+  * **Phase 7 Weekly Review (`generate_weekly_review`)**: Evaluates a 7-day period against previous 7-day baseline, identifies strongest/weakest days, top habits, habits needing attention, and assigns strict `data_status` (`no_data`, `insufficient_data`, `sufficient_data`).
+  * **Phase 7 Goals & Milestones (`calculate_goals_and_milestones`)**: Evaluates active weekly targets against actual SQLite completions, determines milestone achievements, and logs un-notified milestone rows safely.
 
 ### Component 5: Hybrid AI Explainer & Local Fallback
 * **File**: `ai_explainer.py`
 * **Responsibilities**:
   * Receives structured evidence items from `pattern_engine.py`.
-  * Translates patterns into clear, student-friendly coaching explanations and recommendations.
-  * Grounded exclusively in supplied evidence; **never invents statistics or streaks**.
+  * Translates patterns and weekly review metrics into clear, student-friendly coaching explanations and recommendations.
+  * Grounded exclusively in supplied evidence; **never invents statistics, counts, or streaks**.
   * Employs standard library `urllib.request` with timeouts (default 6s) to contact Gemini or OpenAI.
   * Automatically switches to deterministic local fallback on network errors, timeouts, or missing API keys.
   * Implements an in-memory TTL cache (5 minutes) keyed by an evidence fingerprint.
+  * **Phase 7 Weekly Review Explainer (`explain_weekly_review`)**: Explains weekly progress with strengths, habits needing attention, and recommendations; preserves `insufficient_data` boundary without speculating.
 
 ### Component 6: Real AI Habit Coach Chatbox (Phase 6)
 * **Files**: `templates/index.html` (modal & launcher), `static/style.css` (chat drawer styling), `static/script.js` (DOM-safe chat rendering & session management), `app.py` (`POST /api/chat`), `ai_explainer.py` (`chat_with_coach`)
@@ -95,10 +102,17 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
   * Provides an interactive floating chat assistant on the dashboard.
   * Accepts natural-language questions and bounded conversation history (`POST /api/chat`).
   * Enforces sliding-window in-memory IP rate limiting (30 requests/minute) to prevent spam and abuse.
-  * Dynamically extracts the user's active habits, today's completion status, 7-day/30-day rates, and detected pattern evidence from SQLite.
+  * Dynamically extracts the user's active habits, today's completion status, 7-day/30-day rates, detected pattern evidence, and active weekly goals from SQLite.
   * Passes verified context to Google Gemini or OpenAI with strict system instructions prohibiting statistical hallucination.
   * Uses deterministic rule-based local coach fallback when offline or unconfigured.
   * Renders responses strictly using `textContent` and safe DOM text nodes, guaranteeing complete XSS immunity.
+
+### Component 7: Smart Progress & Goal Tracking UI (Phase 7)
+* **Files**: `templates/index.html`, `static/style.css`, `static/script.js`
+* **Responsibilities**:
+  * **Habit Calendar Heatmap**: Displays an accessible CSS-grid month view with color-coded day cells, month navigation (`Prev` / `Next`), habit filter dropdown, dynamic legend, and clickable date inspection modal displaying habit-by-habit status.
+  * **Weekly Progress Review**: Renders structured weekly KPI summary boxes (completion rate, previous week comparison, trend badges), strongest days badge chips, habits needing attention, and AI Coach explanation card with an "Ask AI Coach to explain this review" shortcut into the chat drawer.
+  * **Goals and Milestones**: Enables setting weekly completion targets (1–7 days/week) per habit via modal, displays live visual progress bars, highlights achieved targets and streak milestones, and lets users acknowledge celebration banners (`POST /api/milestones/acknowledge`).
 
 ---
 

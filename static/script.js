@@ -27,6 +27,15 @@ const activeRecordRequests = new Set();
 const activeDeleteRequests = new Set();
 let currentInsightsDays = 30;
 
+// Phase 7 Global State
+let currentCalendarYear = null;
+let currentCalendarMonth = null;
+let currentCalendarHabitId = "";
+let currentCalendarData = null;
+let currentWeeklyReviewData = null;
+let currentGoals = [];
+const acknowledgedMilestones = new Set();
+
 // Category visual styling configuration
 const CATEGORY_CONFIG = {
   "Coding": { icon: "bi-code-slash", color: "bg-indigo-subtle text-indigo" },
@@ -59,6 +68,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // Step F: Initialize AI Habit Coach Chatbox (Phase 6)
   initChatCoach();
+
+  // Step G: Initialize Smart Progress & Goals (Phase 7)
+  initPhase7();
 });
 
 /**
@@ -118,6 +130,11 @@ async function loadHabitsFromApi() {
     updateSummaryMetrics();
     updateCharts();
     loadInsightsFromApi(currentInsightsDays);
+    populateCalendarHabitSelect();
+    populateGoalHabitSelect();
+    loadCalendarHeatmap();
+    loadWeeklyReview();
+    loadGoalsAndMilestones();
 
   } catch (error) {
     console.error("StreakLab: Could not load habits from API:", error);
@@ -499,6 +516,9 @@ async function handleStatusChange(habitId, targetStatus) {
     updateSummaryMetrics();
     updateCharts();
     loadInsightsFromApi(currentInsightsDays);
+    loadCalendarHeatmap();
+    loadWeeklyReview();
+    loadGoalsAndMilestones();
 
   } catch (error) {
     console.error("Failed to update habit record:", error);
@@ -542,6 +562,11 @@ async function deleteHabit(habitId) {
     updateSummaryMetrics();
     updateCharts();
     loadInsightsFromApi(currentInsightsDays);
+    populateCalendarHabitSelect();
+    populateGoalHabitSelect();
+    loadCalendarHeatmap();
+    loadWeeklyReview();
+    loadGoalsAndMilestones();
 
   } catch (error) {
     console.error("Failed to deactivate habit:", error);
@@ -627,6 +652,11 @@ function setupEventListeners() {
         updateSummaryMetrics();
         updateCharts();
         loadInsightsFromApi(currentInsightsDays);
+        populateCalendarHabitSelect();
+        populateGoalHabitSelect();
+        loadCalendarHeatmap();
+        loadWeeklyReview();
+        loadGoalsAndMilestones();
 
       } catch (error) {
         console.error("Failed to create habit:", error);
@@ -1575,4 +1605,715 @@ async function sendChatMessage(message) {
     scrollChatToBottom();
   }
 }
+
+// ----------------------------------------------------------------------------
+// 12. PHASE 7: HABIT CALENDAR HEATMAP, WEEKLY REVIEW & GOALS
+// ----------------------------------------------------------------------------
+
+/**
+ * Initializes Phase 7 modules (Calendar, Weekly Review, Goals).
+ */
+function initPhase7() {
+  const now = new Date();
+  currentCalendarYear = now.getFullYear();
+  currentCalendarMonth = now.getMonth() + 1;
+
+  setupPhase7EventListeners();
+}
+
+/**
+ * Sets up user event listeners for Phase 7 controls.
+ */
+function setupPhase7EventListeners() {
+  // Calendar month buttons
+  const prevBtn = document.getElementById("calendarPrevMonthBtn");
+  if (prevBtn) {
+    prevBtn.addEventListener("click", () => {
+      currentCalendarMonth -= 1;
+      if (currentCalendarMonth < 1) {
+        currentCalendarMonth = 12;
+        currentCalendarYear -= 1;
+      }
+      loadCalendarHeatmap();
+    });
+  }
+
+  const nextBtn = document.getElementById("calendarNextMonthBtn");
+  if (nextBtn) {
+    nextBtn.addEventListener("click", () => {
+      currentCalendarMonth += 1;
+      if (currentCalendarMonth > 12) {
+        currentCalendarMonth = 1;
+        currentCalendarYear += 1;
+      }
+      loadCalendarHeatmap();
+    });
+  }
+
+  const monthLabel = document.getElementById("calendarMonthLabel");
+  if (monthLabel) {
+    monthLabel.addEventListener("click", () => {
+      const now = new Date();
+      currentCalendarYear = now.getFullYear();
+      currentCalendarMonth = now.getMonth() + 1;
+      loadCalendarHeatmap();
+    });
+  }
+
+  // Calendar habit filter select
+  const calHabitSelect = document.getElementById("calendarHabitSelect");
+  if (calHabitSelect) {
+    calHabitSelect.addEventListener("change", (e) => {
+      currentCalendarHabitId = e.target.value;
+      loadCalendarHeatmap();
+    });
+  }
+
+  // Weekly review refresh
+  const refreshReviewBtn = document.getElementById("btnRefreshWeeklyReview");
+  if (refreshReviewBtn) {
+    refreshReviewBtn.addEventListener("click", () => {
+      loadWeeklyReview();
+    });
+  }
+
+  // Goal range slider
+  const rangeInput = document.getElementById("goalTargetValueRange");
+  const displaySpan = document.getElementById("goalTargetValueDisplay");
+  if (rangeInput && displaySpan) {
+    rangeInput.addEventListener("input", (e) => {
+      const val = e.target.value;
+      displaySpan.textContent = `${val} ${val == 1 ? "day" : "days"}`;
+    });
+  }
+
+  // Populate habits when Set Goal modal opens
+  const setGoalModal = document.getElementById("setGoalModal");
+  if (setGoalModal) {
+    setGoalModal.addEventListener("show.bs.modal", () => {
+      populateGoalHabitSelect();
+    });
+  }
+
+  // Set goal form submission
+  const setGoalForm = document.getElementById("setGoalForm");
+  if (setGoalForm) {
+    setGoalForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const habitSelect = document.getElementById("goalHabitSelect");
+      const rangeVal = rangeInput ? parseInt(rangeInput.value, 10) : 5;
+      const submitBtn = document.getElementById("btnSaveGoal");
+
+      const habitId = habitSelect ? parseInt(habitSelect.value, 10) : null;
+      if (!habitId) {
+        if (habitSelect) habitSelect.classList.add("is-invalid");
+        return;
+      }
+      if (habitSelect) habitSelect.classList.remove("is-invalid");
+
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Saving...`;
+      }
+
+      try {
+        const res = await fetch("/api/goals", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ habit_id: habitId, target_value: rangeVal })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          throw new Error(errData.error || `Server error (${res.status})`);
+        }
+
+        const saved = await res.json();
+        showToast(`Target set: ${saved.target_value} days/week for "${saved.habit_name}"! 🎯`, "success");
+
+        // Close modal
+        if (typeof bootstrap !== "undefined" && bootstrap.Modal) {
+          const inst = bootstrap.Modal.getInstance(setGoalModal) || bootstrap.Modal.getOrCreateInstance(setGoalModal);
+          if (inst) inst.hide();
+        }
+
+        loadGoalsAndMilestones();
+      } catch (err) {
+        console.error("Failed to save goal:", err);
+        showToast(`Could not save goal: ${err.message}`, "danger");
+      } finally {
+        if (submitBtn) {
+          submitBtn.disabled = false;
+          submitBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save Target`;
+        }
+      }
+    });
+  }
+}
+
+/**
+ * Populates dropdown options for the calendar and goal modals.
+ */
+function populateCalendarHabitSelect() {
+  const select = document.getElementById("calendarHabitSelect");
+  if (!select) return;
+
+  const currentVal = select.value;
+  let html = `<option value="">All Active Habits</option>`;
+  habits.forEach(h => {
+    html += `<option value="${h.id}">${escapeHtml(h.name)}</option>`;
+  });
+  select.innerHTML = html;
+  if (currentVal) select.value = currentVal;
+}
+
+function populateGoalHabitSelect() {
+  const select = document.getElementById("goalHabitSelect");
+  if (!select) return;
+
+  if (habits.length === 0) {
+    select.innerHTML = `<option value="">No active habits available</option>`;
+    return;
+  }
+
+  let html = `<option value="">-- Choose a habit --</option>`;
+  habits.forEach(h => {
+    html += `<option value="${h.id}">${escapeHtml(h.name)} (${escapeHtml(h.category || "General")})</option>`;
+  });
+  select.innerHTML = html;
+}
+
+/**
+ * Loads calendar heatmap records for the specified month.
+ */
+async function loadCalendarHeatmap() {
+  const container = document.getElementById("calendarGrid");
+  const monthLabel = document.getElementById("calendarMonthLabel");
+
+  if (!currentCalendarYear || !currentCalendarMonth) {
+    const now = new Date();
+    currentCalendarYear = now.getFullYear();
+    currentCalendarMonth = now.getMonth() + 1;
+  }
+
+  const monthParam = `${currentCalendarYear}-${String(currentCalendarMonth).padStart(2, "0")}`;
+  const habitParam = currentCalendarHabitId ? `&habit_id=${encodeURIComponent(currentCalendarHabitId)}` : "";
+
+  try {
+    const res = await fetch(`/api/calendar?month=${monthParam}${habitParam}`);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    currentCalendarData = data;
+
+    if (monthLabel) {
+      monthLabel.textContent = data.month_name || monthParam;
+    }
+
+    renderCalendarHeatmap(data);
+  } catch (err) {
+    console.error("Failed to load calendar heatmap:", err);
+    if (container) {
+      container.innerHTML = `
+        <div class="col-12 text-center py-4 text-muted small">
+          <i class="bi bi-exclamation-triangle text-warning me-1"></i>
+          Unable to load calendar heatmap. <button class="btn btn-sm btn-link p-0" onclick="loadCalendarHeatmap()">Retry</button>
+        </div>
+      `;
+    }
+  }
+}
+
+/**
+ * Renders calendar heatmap grid days.
+ */
+function renderCalendarHeatmap(data) {
+  const container = document.getElementById("calendarGrid");
+  if (!container || !data || !Array.isArray(data.days)) return;
+
+  const firstWeekday = typeof data.first_weekday === "number" ? data.first_weekday : 0; // 0 = Mon
+  const days = data.days;
+
+  let html = "";
+
+  // 1. Leading empty cells for days before the 1st
+  for (let i = 0; i < firstWeekday; i++) {
+    html += `<div class="calendar-cell cell-future" aria-hidden="true" style="opacity: 0.15;"></div>`;
+  }
+
+  // 2. Day cells
+  days.forEach(d => {
+    const status = d.dominant_status || "unrecorded";
+    const statusClass = `cell-${status}`;
+    const todayClass = d.is_today ? "cell-today" : "";
+    const futureClass = d.is_future ? "cell-future" : "";
+
+    let statusText = status.charAt(0).toUpperCase() + status.slice(1);
+    let accessibleLabel = `${d.weekday_name}, ${d.date}: ${statusText}. ${d.completed_count} completed, ${d.missed_count} missed, ${d.skipped_count} skipped out of ${d.total_habits} habits.`;
+
+    let subIndicator = "";
+    if (data.habit_id) {
+      // Single habit mode
+      if (status === "completed") subIndicator = `<i class="bi bi-check-lg text-white"></i>`;
+      else if (status === "missed") subIndicator = `<i class="bi bi-x-lg text-white"></i>`;
+      else if (status === "skipped") subIndicator = `<i class="bi bi-pause-fill text-white"></i>`;
+      else subIndicator = `&bull;`;
+    } else {
+      // Multi-habit summary indicator
+      if (!d.is_future && d.total_habits > 0) {
+        subIndicator = `${d.completed_count}/${d.total_habits}`;
+      }
+    }
+
+    const tabIndex = d.is_future ? "-1" : "0";
+
+    html += `
+      <div 
+        class="calendar-cell ${statusClass} ${todayClass} ${futureClass}"
+        role="gridcell"
+        tabindex="${tabIndex}"
+        aria-label="${escapeHtml(accessibleLabel)}"
+        title="${escapeHtml(accessibleLabel)}"
+        data-date="${d.date}"
+        onclick="inspectCalendarDate('${d.date}')"
+        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();inspectCalendarDate('${d.date}');}">
+        <span class="cell-day-num">${d.day}</span>
+        <span class="cell-sub-indicator">${subIndicator}</span>
+      </div>
+    `;
+  });
+
+  // 3. Trailing cells to fill the row (optional neatness)
+  const totalRendered = firstWeekday + days.length;
+  const remainder = totalRendered % 7;
+  if (remainder !== 0) {
+    const trailingCount = 7 - remainder;
+    for (let i = 0; i < trailingCount; i++) {
+      html += `<div class="calendar-cell cell-future" aria-hidden="true" style="opacity: 0.15;"></div>`;
+    }
+  }
+
+  container.innerHTML = html;
+}
+
+/**
+ * Opens date inspection modal showing all habit records for that date.
+ */
+function inspectCalendarDate(dateStr) {
+  if (!currentCalendarData || !Array.isArray(currentCalendarData.days)) return;
+
+  const day = currentCalendarData.days.find(d => d.date === dateStr);
+  if (!day) return;
+
+  const modalEl = document.getElementById("dateInspectionModal");
+  const modalLabel = document.getElementById("dateInspectionModalLabel");
+  const subLabel = document.getElementById("dateInspectionSubLabel");
+  const container = document.getElementById("dateInspectionRecordsContainer");
+
+  if (!modalEl || !container) return;
+
+  if (modalLabel) {
+    modalLabel.textContent = `${day.weekday_name}, ${day.date}`;
+  }
+  if (subLabel) {
+    subLabel.textContent = `${day.completed_count} of ${day.total_habits} habits completed (${day.dominant_status})`;
+  }
+
+  if (day.records.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-4 text-muted small">
+        <i class="bi bi-calendar-x fs-4 d-block mb-1"></i>
+        No active habits recorded on this date.
+      </div>
+    `;
+  } else {
+    container.innerHTML = day.records.map(r => {
+      let badgeClass = "bg-secondary-subtle text-secondary";
+      let icon = "bi-dash-circle";
+      let label = "Unrecorded";
+
+      if (r.status === "completed") {
+        badgeClass = "bg-success text-white";
+        icon = "bi-check-circle-fill";
+        label = "Completed";
+      } else if (r.status === "missed") {
+        badgeClass = "bg-danger text-white";
+        icon = "bi-x-circle-fill";
+        label = "Missed";
+      } else if (r.status === "skipped") {
+        badgeClass = "bg-warning text-dark";
+        icon = "bi-pause-circle-fill";
+        label = "Skipped";
+      }
+
+      return `
+        <div class="d-flex align-items-center justify-content-between p-2 px-3 rounded-3 bg-light border">
+          <div class="d-flex align-items-center gap-2">
+            <span class="badge bg-primary-subtle text-primary rounded-pill small">${escapeHtml(r.category || "General")}</span>
+            <strong class="small text-dark">${escapeHtml(r.habit_name)}</strong>
+          </div>
+          <span class="badge ${badgeClass} rounded-pill d-flex align-items-center gap-1 small">
+            <i class="bi ${icon}"></i>
+            ${label}
+          </span>
+        </div>
+      `;
+    }).join("");
+  }
+
+  if (typeof bootstrap !== "undefined" && bootstrap.Modal) {
+    const modalInst = bootstrap.Modal.getOrCreateInstance(modalEl);
+    modalInst.show();
+  }
+}
+
+/**
+ * Loads weekly progress review from /api/reviews/weekly.
+ */
+async function loadWeeklyReview(targetDateStr = null) {
+  const container = document.getElementById("weeklyReviewContent");
+  const periodLabel = document.getElementById("weeklyReviewPeriodLabel");
+
+  const dateParam = targetDateStr ? `?date=${encodeURIComponent(targetDateStr)}` : "";
+
+  try {
+    const res = await fetch(`/api/reviews/weekly${dateParam}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+    currentWeeklyReviewData = data;
+
+    if (periodLabel && data.period) {
+      periodLabel.textContent = `${data.period.start_date} – ${data.period.end_date}`;
+    }
+
+    renderWeeklyReview(data);
+  } catch (err) {
+    console.error("Failed to load weekly review:", err);
+    if (container) {
+      container.innerHTML = `
+        <div class="text-center py-4 text-muted small">
+          <i class="bi bi-exclamation-triangle text-warning me-1"></i>
+          Unable to load weekly review. <button class="btn btn-sm btn-link p-0" onclick="loadWeeklyReview()">Retry</button>
+        </div>
+      `;
+    }
+  }
+}
+
+/**
+ * Renders weekly progress review content.
+ */
+function renderWeeklyReview(data) {
+  const container = document.getElementById("weeklyReviewContent");
+  if (!container || !data) return;
+
+  const dataStatus = data.data_status || "no_data";
+  const stats = data.statistics || {};
+  const exp = data.explanation || {};
+
+  // 1. No Data State
+  if (dataStatus === "no_data") {
+    container.innerHTML = `
+      <div class="text-center py-4 text-muted small">
+        <div class="empty-icon-circle mx-auto mb-2" style="width: 48px; height: 48px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center;">
+          <i class="bi bi-calendar-x text-muted fs-4"></i>
+        </div>
+        <h6 class="fw-bold mb-1 text-dark">No Check-ins This Week</h6>
+        <p class="text-muted small mb-3">Check in on today's habits to start accumulating your weekly progress records.</p>
+      </div>
+    `;
+    return;
+  }
+
+  // 2. Insufficient Data Warning (Never fabricate statistics)
+  let insufficientWarningHtml = "";
+  if (dataStatus === "insufficient_data") {
+    insufficientWarningHtml = `
+      <div class="alert alert-warning border-warning-subtle rounded-3 p-2 px-3 mb-3 small d-flex align-items-center gap-2">
+        <i class="bi bi-info-circle-fill text-warning fs-5 flex-shrink-0"></i>
+        <div>
+          <strong>Limited Weekly Data:</strong> Only ${stats.total_records} check-in${stats.total_records > 1 ? "s" : ""} logged. Minimum 3 days recommended for complete weekly trends.
+        </div>
+      </div>
+    `;
+  }
+
+  // 3. Comparison Trend Badge
+  let trendBadge = "";
+  if (stats.trend === "improved") {
+    trendBadge = `<span class="badge bg-success-subtle text-success border border-success-subtle rounded-pill small"><i class="bi bi-arrow-up-right me-1"></i>+${stats.rate_diff}% vs last week</span>`;
+  } else if (stats.trend === "declined") {
+    trendBadge = `<span class="badge bg-danger-subtle text-danger border border-danger-subtle rounded-pill small"><i class="bi bi-arrow-down-right me-1"></i>${stats.rate_diff}% vs last week</span>`;
+  } else if (stats.trend === "steady") {
+    trendBadge = `<span class="badge bg-secondary-subtle text-secondary border rounded-pill small"><i class="bi bi-dash me-1"></i>Steady pace</span>`;
+  } else {
+    trendBadge = `<span class="badge bg-light text-muted border rounded-pill small"><i class="bi bi-flag me-1"></i>Baseline week</span>`;
+  }
+
+  // 4. Strongest Recorded Days Chips
+  let strongDaysHtml = "";
+  if (Array.isArray(data.strongest_recorded_days) && data.strongest_recorded_days.length > 0) {
+    const chips = data.strongest_recorded_days.map(d => `
+      <span class="day-badge-chip">
+        <i class="bi bi-fire text-warning"></i>
+        ${escapeHtml(d.day_name)} (${d.completed} done &bull; ${d.rate}%)
+      </span>
+    `).join(" ");
+    strongDaysHtml = `
+      <div class="mb-3">
+        <small class="text-muted fw-semibold d-block mb-1">STRONGEST RECORDED DAYS</small>
+        <div class="d-flex flex-wrap gap-2">${chips}</div>
+      </div>
+    `;
+  }
+
+  // 5. Habits Needing Attention
+  let attentionHtml = "";
+  if (Array.isArray(data.habits_needing_attention) && data.habits_needing_attention.length > 0) {
+    const items = data.habits_needing_attention.map(h => `
+      <div class="d-flex align-items-center justify-content-between py-1 px-2 rounded bg-rose-subtle text-danger small mb-1">
+        <span><strong>${escapeHtml(h.name)}:</strong> ${escapeHtml(h.reason)}</span>
+        <span class="badge bg-danger text-white rounded-pill">${h.rate}%</span>
+      </div>
+    `).join("");
+    attentionHtml = `
+      <div class="mb-3">
+        <small class="text-muted fw-semibold d-block mb-1">HABITS NEEDING ATTENTION</small>
+        <div>${items}</div>
+      </div>
+    `;
+  }
+
+  // 6. AI Coach Explanation Box
+  let aiCoachBoxHtml = "";
+  if (exp && exp.summary) {
+    const sourceBadgeClass = exp.source === "ai" ? "bg-purple-subtle text-purple border-purple-subtle" : "bg-light text-muted border";
+    const providerText = exp.source === "ai" ? `${(exp.provider || "AI").toUpperCase()} AI COACH` : "RULE-BASED COACH";
+
+    let recsHtml = "";
+    if (Array.isArray(exp.recommendations) && exp.recommendations.length > 0) {
+      recsHtml = `<ul class="mb-0 ps-3 mt-1 text-muted small">` + exp.recommendations.map(r => `<li>${escapeHtml(r)}</li>`).join("") + `</ul>`;
+    }
+
+    aiCoachBoxHtml = `
+      <div class="coach-review-box mt-3">
+        <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-1">
+          <div class="d-flex align-items-center gap-2">
+            <div class="chat-avatar-wrapper" style="width: 26px; height: 26px; font-size: 0.8rem;">
+              <i class="bi bi-robot"></i>
+            </div>
+            <strong class="small text-dark">AI Habit Coach Review</strong>
+          </div>
+          <span class="badge ${sourceBadgeClass} rounded-pill small fs-xxs">
+            <i class="bi bi-shield-check text-success me-1"></i>${providerText}
+          </span>
+        </div>
+        <p class="text-dark small mb-2">${escapeHtml(exp.summary)}</p>
+        ${recsHtml}
+        <div class="mt-2 pt-2 border-top d-flex justify-content-end">
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1 fs-xs" onclick="askCoachAboutWeeklyReview()">
+            <i class="bi bi-chat-dots-fill me-1"></i>Ask Coach in Chat
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    ${insufficientWarningHtml}
+
+    <!-- Weekly KPI Card -->
+    <div class="weekly-kpi-box mb-3">
+      <div class="d-flex justify-content-between align-items-start mb-2">
+        <div>
+          <span class="text-muted small fw-medium d-block">Weekly Completion Pace</span>
+          <h4 class="fw-bold mb-0 text-dark">${stats.completion_rate}%</h4>
+        </div>
+        ${trendBadge}
+      </div>
+      <div class="d-flex align-items-center gap-3 pt-2 border-top small text-muted">
+        <span><strong class="text-success">${stats.completed}</strong> completed</span>
+        <span>&bull;</span>
+        <span><strong class="text-danger">${stats.missed}</strong> missed</span>
+        <span>&bull;</span>
+        <span><strong class="text-warning">${stats.skipped}</strong> skipped</span>
+      </div>
+    </div>
+
+    ${strongDaysHtml}
+    ${attentionHtml}
+    ${aiCoachBoxHtml}
+  `;
+}
+
+/**
+ * Pre-fills the chat coach drawer with a weekly review question and opens it.
+ */
+function askCoachAboutWeeklyReview() {
+  const chatLauncherBtn = document.getElementById("chatLauncherBtn");
+  const chatPanel = document.getElementById("chatPanel");
+  const chatInput = document.getElementById("chatInput");
+
+  if (chatPanel && chatPanel.classList.contains("d-none")) {
+    if (chatLauncherBtn) chatLauncherBtn.click();
+  }
+
+  if (chatInput) {
+    chatInput.value = "Can you analyze my weekly progress review and give me tailored tips?";
+    chatInput.focus();
+  }
+}
+
+/**
+ * Loads goals & milestones from /api/goals.
+ */
+async function loadGoalsAndMilestones(targetDateStr = null) {
+  const container = document.getElementById("goalsListContainer");
+  const alertContainer = document.getElementById("milestoneAlertContainer");
+  const dateParam = targetDateStr ? `?date=${encodeURIComponent(targetDateStr)}` : "";
+
+  try {
+    const res = await fetch(`/api/goals${dateParam}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+    currentGoals = data.goals || [];
+
+    // Check for newly achieved milestones & notify without duplicates
+    if (Array.isArray(data.new_milestones) && data.new_milestones.length > 0) {
+      const unnotified = data.new_milestones.filter(m => !acknowledgedMilestones.has(m.id));
+      if (unnotified.length > 0) {
+        unnotified.forEach(m => {
+          acknowledgedMilestones.add(m.id);
+          showToast(`🎉 ${m.title}! ${m.message}`, "success");
+        });
+
+        // Display celebratory banner
+        if (alertContainer) {
+          const firstM = unnotified[0];
+          alertContainer.innerHTML = `
+            <div class="milestone-banner d-flex align-items-center justify-content-between gap-2 shadow-sm mb-3">
+              <div class="d-flex align-items-center gap-2">
+                <i class="bi bi-trophy-fill fs-4 text-warning"></i>
+                <div>
+                  <strong class="d-block text-dark">${escapeHtml(firstM.title)}</strong>
+                  <span class="small">${escapeHtml(firstM.message)}</span>
+                </div>
+              </div>
+              <button type="button" class="btn-close" aria-label="Close" onclick="this.parentElement.remove()"></button>
+            </div>
+          `;
+        }
+
+        // Acknowledge milestones to database to avoid repeat alerts
+        const mIds = unnotified.map(m => m.id);
+        fetch("/api/milestones/acknowledge", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ milestone_ids: mIds })
+        }).catch(e => console.warn("Acknowledge milestone error:", e));
+      }
+    }
+
+    renderGoals(currentGoals);
+  } catch (err) {
+    console.error("Failed to load goals:", err);
+    if (container) {
+      container.innerHTML = `
+        <div class="text-center py-3 text-muted small">
+          Unable to load goals. <button class="btn btn-sm btn-link p-0" onclick="loadGoalsAndMilestones()">Retry</button>
+        </div>
+      `;
+    }
+  }
+}
+
+/**
+ * Renders weekly goals list with progress bars.
+ */
+function renderGoals(goals) {
+  const container = document.getElementById("goalsListContainer");
+  if (!container) return;
+
+  if (!Array.isArray(goals) || goals.length === 0) {
+    container.innerHTML = `
+      <div class="text-center py-4 text-muted small">
+        <div class="empty-icon-circle mx-auto mb-2" style="width: 44px; height: 44px; border-radius: 50%; background: #fff7ed; display: flex; align-items: center; justify-content: center;">
+          <i class="bi bi-bullseye text-orange fs-4"></i>
+        </div>
+        <h6 class="fw-bold mb-1 text-dark">No Weekly Targets Defined</h6>
+        <p class="text-muted small mb-3">Set weekly target days (e.g. 5 days/week) to track milestone progress.</p>
+        <button class="btn btn-sm btn-outline-primary rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#setGoalModal">
+          <i class="bi bi-plus-lg me-1"></i>Set a Goal
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  container.innerHTML = goals.map(g => {
+    const isAchieved = g.is_achieved;
+    const progressPct = g.progress_percentage || 0;
+    const barColor = isAchieved ? "bg-success" : "bg-primary";
+    const achievedClass = isAchieved ? "goal-achieved" : "";
+
+    let statusBadge = "";
+    if (isAchieved) {
+      statusBadge = `<span class="badge bg-success text-white rounded-pill small"><i class="bi bi-trophy-fill me-1"></i>Target Hit! 🎉</span>`;
+    } else {
+      statusBadge = `<span class="badge bg-light text-muted border rounded-pill small">${g.remaining} more day${g.remaining === 1 ? '' : 's'} needed</span>`;
+    }
+
+    return `
+      <div class="goal-card ${achievedClass}">
+        <div class="d-flex justify-content-between align-items-start mb-2">
+          <div>
+            <div class="d-flex align-items-center gap-2 mb-1">
+              <strong class="text-dark small">${escapeHtml(g.habit_name)}</strong>
+              <span class="badge bg-primary-subtle text-primary rounded-pill fs-xxs">${escapeHtml(g.category || "General")}</span>
+            </div>
+            <span class="text-muted small">Target: <strong>${g.target_value} days/week</strong></span>
+          </div>
+          <div class="d-flex align-items-center gap-2">
+            ${statusBadge}
+            <button type="button" class="btn btn-sm btn-link text-muted p-0" title="Remove Goal" onclick="deleteGoal(${g.id})">
+              <i class="bi bi-x-circle"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Progress Bar -->
+        <div class="d-flex justify-content-between align-items-center mb-1 small">
+          <span class="text-muted">${g.completed_this_week} of ${g.target_value} completed</span>
+          <strong class="${isAchieved ? 'text-success' : 'text-primary'}">${progressPct}%</strong>
+        </div>
+        <div class="progress" style="height: 8px;">
+          <div class="progress-bar ${barColor} rounded-pill" role="progressbar" style="width: ${progressPct}%" aria-valuenow="${progressPct}" aria-valuemin="0" aria-valuemax="100"></div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+/**
+ * Removes a habit target using DELETE /api/goals/<id>.
+ */
+async function deleteGoal(goalId) {
+  const confirmed = window.confirm("Remove this weekly target?");
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch(`/api/goals/${goalId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast("Goal target removed.", "info");
+    loadGoalsAndMilestones();
+  } catch (err) {
+    console.error("Failed to delete goal:", err);
+    showToast(`Could not remove goal: ${err.message}`, "danger");
+  }
+}
+
 

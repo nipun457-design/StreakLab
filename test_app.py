@@ -1376,8 +1376,315 @@ class StreakLabTestCase(unittest.TestCase):
         self.assertEqual(explanations.status_code, 200)
         self.assertIn("explanations", explanations.get_json())
 
+    # -----------------------------------------------------------------------
+    # PHASE 7: HABIT CALENDAR HEATMAP TESTS
+    # -----------------------------------------------------------------------
+    def test_phase7_calendar_heatmap_month_view(self):
+        """Calendar Heatmap returns valid days list, weekday indexing, and counts."""
+        h1 = self.client.post('/api/habits', json={"name": "Morning Run", "category": "Fitness"}).get_json()['id']
+        h2 = self.client.post('/api/habits', json={"name": "Read Book", "category": "Learning"}).get_json()['id']
+
+        # Log some records in October 2026
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-10", "status": "completed"})
+        self.client.post('/api/records', json={"habit_id": h2, "record_date": "2026-10-10", "status": "completed"})
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-11", "status": "missed"})
+
+        res = self.client.get('/api/calendar?month=2026-10&date=2026-10-15')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["month"], "2026-10")
+        self.assertEqual(data["total_days"], 31)
+        self.assertEqual(len(data["days"]), 31)
+        self.assertEqual(data["summary"]["total_active_habits"], 2)
+
+        # Day 10 should be 'completed' since both habits were completed
+        day10 = next(d for d in data["days"] if d["date"] == "2026-10-10")
+        self.assertEqual(day10["completed_count"], 2)
+        self.assertEqual(day10["dominant_status"], "completed")
+
+        # Day 11 should be 'missed' since h1 missed and h2 unrecorded
+        day11 = next(d for d in data["days"] if d["date"] == "2026-10-11")
+        self.assertEqual(day11["missed_count"], 1)
+        self.assertEqual(day11["dominant_status"], "missed")
+
+        # Future day (Oct 20 when target_date is Oct 15)
+        day20 = next(d for d in data["days"] if d["date"] == "2026-10-20")
+        self.assertTrue(day20["is_future"])
+        self.assertEqual(day20["dominant_status"], "future")
+
+    def test_phase7_calendar_heatmap_single_habit_filter(self):
+        """Calendar Heatmap filtered by single habit_id reflects that habit's direct statuses."""
+        h1 = self.client.post('/api/habits', json={"name": "Coding Practice", "category": "Coding"}).get_json()['id']
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-05", "status": "skipped"})
+
+        res = self.client.get(f'/api/calendar?month=2026-10&habit_id={h1}&date=2026-10-15')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["habit_id"], h1)
+        self.assertEqual(data["habit_name"], "Coding Practice")
+
+        day5 = next(d for d in data["days"] if d["date"] == "2026-10-05")
+        self.assertEqual(day5["dominant_status"], "skipped")
+        self.assertEqual(day5["skipped_count"], 1)
+
+    def test_phase7_calendar_heatmap_invalid_inputs(self):
+        """Calendar Heatmap validates month formatting and habit existence."""
+        # Invalid month format
+        res1 = self.client.get('/api/calendar?month=invalid')
+        self.assertEqual(res1.status_code, 400)
+
+        # Month out of range
+        res2 = self.client.get('/api/calendar?month=2026-13')
+        self.assertEqual(res2.status_code, 400)
+
+        # Nonexistent habit_id
+        res3 = self.client.get('/api/calendar?habit_id=99999')
+        self.assertEqual(res3.status_code, 404)
+
+        # Invalid habit_id format
+        res4 = self.client.get('/api/calendar?habit_id=abc')
+        self.assertEqual(res4.status_code, 400)
+
+    # -----------------------------------------------------------------------
+    # PHASE 7: WEEKLY PROGRESS REVIEW TESTS
+    # -----------------------------------------------------------------------
+    def test_phase7_weekly_review_no_data(self):
+        """Empty habit database returns no_data status without crashing or fabricating stats."""
+        res = self.client.get('/api/reviews/weekly?date=2026-10-22')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["data_status"], "no_data")
+        self.assertEqual(data["statistics"]["total_records"], 0)
+        self.assertEqual(data["statistics"]["completion_rate"], 0.0)
+        self.assertIn("explanation", data)
+        self.assertEqual(data["explanation"]["source"], "fallback")
+
+    def test_phase7_weekly_review_insufficient_data(self):
+        """Fewer than 3 records returns insufficient_data status to avoid fabricated trends."""
+        h1 = self.client.post('/api/habits', json={"name": "Meditation", "category": "Mindfulness"}).get_json()['id']
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-20", "status": "completed"})
+
+        res = self.client.get('/api/reviews/weekly?date=2026-10-22')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["data_status"], "insufficient_data")
+        self.assertEqual(data["statistics"]["total_records"], 1)
+        self.assertIn("insufficient", data["message"].lower())
+        self.assertIn("explanation", data)
+        self.assertEqual(data["explanation"]["source"], "fallback")
+
+    def test_phase7_weekly_review_sufficient_data_and_trends(self):
+        """Weekly review computes accurate statistics, comparisons, and strongest days."""
+        h1 = self.client.post('/api/habits', json={"name": "Gym Workout", "category": "Fitness"}).get_json()['id']
+        h2 = self.client.post('/api/habits', json={"name": "DSA Practice", "category": "Coding"}).get_json()['id']
+
+        # Log current week records (2026-10-16 to 2026-10-22)
+        # Tuesday 2026-10-20: both completed
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-20", "status": "completed"})
+        self.client.post('/api/records', json={"habit_id": h2, "record_date": "2026-10-20", "status": "completed"})
+        # Wednesday 2026-10-21: h1 completed, h2 missed
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-21", "status": "completed"})
+        self.client.post('/api/records', json={"habit_id": h2, "record_date": "2026-10-21", "status": "missed"})
+        # Thursday 2026-10-22: h1 completed, h2 missed (h2 has 2 misses -> needs attention)
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-22", "status": "completed"})
+        self.client.post('/api/records', json={"habit_id": h2, "record_date": "2026-10-22", "status": "missed"})
+
+        res = self.client.get('/api/reviews/weekly?date=2026-10-22')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["data_status"], "sufficient_data")
+        stats = data["statistics"]
+        self.assertEqual(stats["total_records"], 6)
+        self.assertEqual(stats["completed"], 4)
+        self.assertEqual(stats["missed"], 2)
+        # 4 completed out of 6 evaluated -> 66.7%
+        self.assertEqual(stats["completion_rate"], 66.7)
+
+        # Strongest recorded day should be Tuesday (100% completion)
+        strong_days = data["strongest_recorded_days"]
+        self.assertTrue(len(strong_days) > 0)
+        self.assertEqual(strong_days[0]["day_name"], "Tuesday")
+        self.assertEqual(strong_days[0]["rate"], 100.0)
+
+        # Habit h2 has 2 missed days -> should be flagged in habits_needing_attention
+        attention_names = [h["name"] for h in data["habits_needing_attention"]]
+        self.assertIn("DSA Practice", attention_names)
+
+        # Explanation should be present and grounded
+        self.assertIn("explanation", data)
+        self.assertIn("summary", data["explanation"])
+
+    def test_phase7_weekly_review_mocked_ai_provider(self):
+        """Mocked AI provider produces grounded weekly coaching review."""
+        h1 = self.client.post('/api/habits', json={"name": "Writing", "category": "Learning"}).get_json()['id']
+        for i in range(4):
+            d = (date.today() - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": h1, "record_date": d, "status": "completed"})
+
+        mock_config = {
+            "provider": "gemini",
+            "api_key": "MOCK_KEY",
+            "model": "gemini-1.5-flash",
+            "endpoint": "",
+            "timeout": 5,
+            "is_configured": True
+        }
+        mock_ai_response = {
+            "summary": "Solid week with 100% completion on Writing routine.",
+            "strengths": ["Consistent daily execution across all 4 check-ins."],
+            "habits_needing_attention": [],
+            "recommendations": ["Maintain current pace and prepare prompts ahead of time."]
+        }
+
+        with patch('ai_explainer.get_ai_config', return_value=mock_config):
+            with patch('ai_explainer._call_gemini_api', return_value=mock_ai_response):
+                res = self.client.get('/api/reviews/weekly')
+                self.assertEqual(res.status_code, 200)
+                data = res.get_json()
+                exp = data["explanation"]
+                self.assertEqual(exp["source"], "ai")
+                self.assertEqual(exp["provider"], "gemini")
+                self.assertIn("Solid week", exp["summary"])
+
+    # -----------------------------------------------------------------------
+    # PHASE 7: GOALS AND MILESTONES TESTS
+    # -----------------------------------------------------------------------
+    def test_phase7_create_goal_and_validation(self):
+        """POST /api/goals validates habit existence, target bounds, and JSON structure."""
+        h1 = self.client.post('/api/habits', json={"name": "Daily Stretching", "category": "Fitness"}).get_json()['id']
+
+        # Missing habit_id
+        res1 = self.client.post('/api/goals', json={"target_value": 5})
+        self.assertEqual(res1.status_code, 400)
+
+        # Nonexistent habit_id
+        res2 = self.client.post('/api/goals', json={"habit_id": 99999, "target_value": 5})
+        self.assertEqual(res2.status_code, 404)
+
+        # Target value < 1
+        res3 = self.client.post('/api/goals', json={"habit_id": h1, "target_value": 0})
+        self.assertEqual(res3.status_code, 400)
+
+        # Target value > 7
+        res4 = self.client.post('/api/goals', json={"habit_id": h1, "target_value": 8})
+        self.assertEqual(res4.status_code, 400)
+
+        # Non-JSON
+        res5 = self.client.post('/api/goals', data="invalid", content_type='text/plain')
+        self.assertEqual(res5.status_code, 400)
+
+        # Valid goal creation -> 201 Created
+        res_ok = self.client.post('/api/goals', json={"habit_id": h1, "target_value": 5})
+        self.assertEqual(res_ok.status_code, 201)
+        data = res_ok.get_json()
+        self.assertEqual(data["habit_id"], h1)
+        self.assertEqual(data["target_value"], 5)
+        self.assertFalse(data["is_achieved"])
+        self.assertEqual(data["remaining"], 5)
+
+        # Updating existing goal -> 200 OK
+        res_update = self.client.post('/api/goals', json={"habit_id": h1, "target_value": 6})
+        self.assertEqual(res_update.status_code, 200)
+        self.assertEqual(res_update.get_json()["target_value"], 6)
+
+    def test_phase7_delete_goal(self):
+        """DELETE /api/goals/<id> deactivates goal cleanly."""
+        h1 = self.client.post('/api/habits', json={"name": "Piano Practice", "category": "General"}).get_json()['id']
+        g_res = self.client.post('/api/goals', json={"habit_id": h1, "target_value": 4})
+        gid = g_res.get_json()["id"]
+
+        del_res = self.client.delete(f'/api/goals/{gid}')
+        self.assertEqual(del_res.status_code, 200)
+
+        # GET /api/goals should now return 0 active goals
+        get_res = self.client.get('/api/goals')
+        self.assertEqual(len(get_res.get_json()["goals"]), 0)
+
+        # Non-existent goal deletion
+        del_404 = self.client.delete('/api/goals/99999')
+        self.assertEqual(del_404.status_code, 404)
+
+    def test_phase7_goal_progress_and_milestone_achievement(self):
+        """Goals evaluate progress accurately and prevent duplicate milestone notifications."""
+        h1 = self.client.post('/api/habits', json={"name": "Hydration Habit", "category": "Health"}).get_json()['id']
+        # Set weekly target of 3 completions
+        self.client.post('/api/goals', json={"habit_id": h1, "target_value": 3})
+
+        ref_date = date(2026, 10, 21) # Wednesday of week 2026-W43 (Monday is Oct 19)
+        # Log 2 completions in this week
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-19", "status": "completed"})
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-20", "status": "completed"})
+
+        # Check progress: 2/3 = 66.7%, not achieved yet
+        res_prog = self.client.get(f'/api/goals?date={ref_date.isoformat()}')
+        self.assertEqual(res_prog.status_code, 200)
+        goals = res_prog.get_json()["goals"]
+        self.assertEqual(len(goals), 1)
+        self.assertEqual(goals[0]["completed_this_week"], 2)
+        self.assertEqual(goals[0]["progress_percentage"], 66.7)
+        self.assertFalse(goals[0]["is_achieved"])
+        self.assertEqual(len(res_prog.get_json()["new_milestones"]), 0)
+
+        # Log 3rd completion -> target reached!
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": "2026-10-21", "status": "completed"})
+
+        res_achieved = self.client.get(f'/api/goals?date={ref_date.isoformat()}')
+        self.assertEqual(res_achieved.status_code, 200)
+        achieved_data = res_achieved.get_json()
+        goal_item = achieved_data["goals"][0]
+        self.assertTrue(goal_item["is_achieved"])
+        self.assertEqual(goal_item["progress_percentage"], 100.0)
+        self.assertTrue(goal_item["has_new_milestone"])
+
+        # New milestone notification should be present
+        new_ms = achieved_data["new_milestones"]
+        self.assertEqual(len(new_ms), 1)
+        mid = new_ms[0]["id"]
+
+        # Acknowledge milestone
+        ack_res = self.client.post('/api/milestones/acknowledge', json={"milestone_id": mid})
+        self.assertEqual(ack_res.status_code, 200)
+        self.assertIn(mid, ack_res.get_json()["acknowledged_ids"])
+
+        # Querying /api/goals again should NOT report new_milestone again (duplicate prevention!)
+        res_after_ack = self.client.get(f'/api/goals?date={ref_date.isoformat()}')
+        self.assertEqual(res_after_ack.status_code, 200)
+        data_after = res_after_ack.get_json()
+        self.assertTrue(data_after["goals"][0]["is_achieved"])
+        self.assertFalse(data_after["goals"][0]["has_new_milestone"])
+        self.assertEqual(len(data_after["new_milestones"]), 0)
+
+    def test_phase7_acknowledge_milestone_validation(self):
+        """POST /api/milestones/acknowledge validates IDs and payload format."""
+        # Non-JSON
+        res1 = self.client.post('/api/milestones/acknowledge', data="not json", content_type='text/plain')
+        self.assertEqual(res1.status_code, 400)
+
+        # Empty body
+        res2 = self.client.post('/api/milestones/acknowledge', json={})
+        self.assertEqual(res2.status_code, 400)
+
+        # Invalid ID format
+        res3 = self.client.post('/api/milestones/acknowledge', json={"milestone_id": "abc"})
+        self.assertEqual(res3.status_code, 400)
+
+    def test_phase7_coach_chatbox_answers_goals_query(self):
+        """Conversational AI Coach answers queries about weekly targets and goals."""
+        ai_explainer.reset_chat_rate_limits()
+        h1 = self.client.post('/api/habits', json={"name": "Goal Chat Habit", "category": "Coding"}).get_json()['id']
+        self.client.post('/api/goals', json={"habit_id": h1, "target_value": 5})
+
+        res = self.client.post('/api/chat', json={"message": "What are my habit goals this week?"})
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertTrue(data.get("success"))
+        reply = data.get("reply", "")
+        self.assertIn("Goal Chat Habit", reply)
+        self.assertIn("Target 5 days/week", reply)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 
 

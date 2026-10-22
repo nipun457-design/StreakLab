@@ -13,6 +13,7 @@ Phase 3: Rule-Based Statistical Pattern Detection
 =============================================================================
 """
 
+import calendar
 from datetime import datetime, timedelta, date
 
 
@@ -784,3 +785,614 @@ def get_habit_analytics(days=30, target_date_str=None, db=None):
         "habit_breakdown": habit_breakdown,
         "time_of_day_distribution": time_groups
     }
+
+
+# ---------------------------------------------------------------------------
+# PHASE 7: HABIT CALENDAR HEATMAP, WEEKLY REVIEW, AND GOALS
+# ---------------------------------------------------------------------------
+
+def calculate_current_streak(habit_id, target_date=None, db=None):
+    """
+    Calculates active consecutive completed days for a habit ending at target_date.
+    Skipped preserves the streak without incrementing; missed breaks the streak.
+    Pending/unrecorded today does not break yesterday's streak.
+    """
+    if target_date is None:
+        target_date = date.today()
+    elif isinstance(target_date, str):
+        target_date = parse_target_date(target_date)
+
+    cursor = db.execute(
+        "SELECT record_date, status FROM habit_records WHERE habit_id = ? AND record_date <= ? ORDER BY record_date DESC",
+        (habit_id, target_date.isoformat())
+    )
+    records = {row["record_date"]: row["status"] for row in cursor.fetchall()}
+
+    streak = 0
+    curr_date = target_date
+    today_iso = target_date.isoformat()
+
+    if today_iso not in records:
+        curr_date = target_date - timedelta(days=1)
+
+    while True:
+        d_str = curr_date.isoformat()
+        if d_str not in records:
+            break
+
+        status = records[d_str]
+        if status == "completed":
+            streak += 1
+            curr_date -= timedelta(days=1)
+        elif status == "skipped":
+            curr_date -= timedelta(days=1)
+        else:
+            break
+
+    return streak
+
+
+def get_calendar_heatmap(month_str=None, habit_id=None, target_date_str=None, db=None):
+    """
+    Phase 7: Calendar Heatmap Builder.
+    Returns month calendar grid with day-by-day records and status for all active habits
+    or for a single habit.
+    
+    Parameters:
+      - month_str: 'YYYY-MM' (default: current month)
+      - habit_id: optional integer to filter by single habit
+      - target_date_str: optional reference date
+      - db: SQLite database connection
+    """
+    ref_date = parse_target_date(target_date_str)
+    
+    if month_str:
+        try:
+            parts = month_str.strip().split("-")
+            year = int(parts[0])
+            month = int(parts[1])
+            if month < 1 or month > 12:
+                raise ValueError("Month out of range")
+        except Exception:
+            year = ref_date.year
+            month = ref_date.month
+    else:
+        year = ref_date.year
+        month = ref_date.month
+
+    # Number of days in this month
+    first_weekday, num_days = calendar.monthrange(year, month)
+    first_date = date(year, month, 1)
+    last_date = date(year, month, num_days)
+
+    # Get habits
+    if habit_id is not None:
+        cursor = db.execute("SELECT * FROM habits WHERE id = ?", (habit_id,))
+        habits = cursor.fetchall()
+        selected_habit_name = habits[0]["name"] if habits else None
+    else:
+        cursor = db.execute("SELECT * FROM habits WHERE active = 1 ORDER BY id ASC")
+        habits = cursor.fetchall()
+        selected_habit_name = None
+
+    # Fetch all records for the target habit(s) in this month window
+    if habit_id is not None:
+        rec_cursor = db.execute(
+            """
+            SELECT habit_id, record_date, status
+            FROM habit_records
+            WHERE habit_id = ? AND record_date BETWEEN ? AND ?
+            """,
+            (habit_id, first_date.isoformat(), last_date.isoformat())
+        )
+    else:
+        rec_cursor = db.execute(
+            """
+            SELECT r.habit_id, r.record_date, r.status
+            FROM habit_records r
+            JOIN habits h ON r.habit_id = h.id
+            WHERE h.active = 1 AND r.record_date BETWEEN ? AND ?
+            """,
+            (first_date.isoformat(), last_date.isoformat())
+        )
+
+    records_map = {}
+    for r in rec_cursor.fetchall():
+        records_map[(r["record_date"], r["habit_id"])] = r["status"]
+
+    days = []
+    month_completed = 0
+    month_missed = 0
+    month_skipped = 0
+    recorded_days_set = set()
+
+    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+    for d in range(1, num_days + 1):
+        curr_d = date(year, month, d)
+        d_str = curr_d.isoformat()
+        is_today = (curr_d == ref_date)
+        is_future = (curr_d > ref_date)
+
+        day_habits = []
+        c_count = 0
+        m_count = 0
+        s_count = 0
+        u_count = 0
+
+        for h in habits:
+            h_id = h["id"]
+            st = records_map.get((d_str, h_id), "unrecorded")
+            if st == "completed":
+                c_count += 1
+                month_completed += 1
+                recorded_days_set.add(d_str)
+            elif st == "missed":
+                m_count += 1
+                month_missed += 1
+                recorded_days_set.add(d_str)
+            elif st == "skipped":
+                s_count += 1
+                month_skipped += 1
+                recorded_days_set.add(d_str)
+            else:
+                u_count += 1
+
+            day_habits.append({
+                "habit_id": h_id,
+                "habit_name": h["name"],
+                "category": h["category"] or "General",
+                "time_of_day": h["time_of_day"] if "time_of_day" in h.keys() and h["time_of_day"] else "Morning",
+                "status": st
+            })
+
+        total_habits = len(habits)
+
+        # Dominant status classification
+        if is_future:
+            dominant_status = "future"
+        elif total_habits == 0:
+            dominant_status = "unrecorded"
+        elif habit_id is not None:
+            # Single habit mode
+            dominant_status = day_habits[0]["status"] if day_habits else "unrecorded"
+        else:
+            # Multi habit mode
+            if c_count == total_habits and total_habits > 0:
+                dominant_status = "completed"
+            elif c_count > 0:
+                dominant_status = "mixed"
+            elif m_count > 0:
+                dominant_status = "missed"
+            elif s_count > 0:
+                dominant_status = "skipped"
+            else:
+                dominant_status = "unrecorded"
+
+        w_idx = curr_d.weekday()
+        days.append({
+            "date": d_str,
+            "day": d,
+            "weekday": w_idx,
+            "weekday_name": weekday_names[w_idx],
+            "is_today": is_today,
+            "is_future": is_future,
+            "total_habits": total_habits,
+            "completed_count": c_count,
+            "missed_count": m_count,
+            "skipped_count": s_count,
+            "unrecorded_count": u_count,
+            "dominant_status": dominant_status,
+            "records": day_habits
+        })
+
+    month_eval = month_completed + month_missed
+    month_rate = round((month_completed / month_eval * 100.0), 1) if month_eval > 0 else 0.0
+
+    return {
+        "month": f"{year:04d}-{month:02d}",
+        "month_name": first_date.strftime("%B %Y"),
+        "year": year,
+        "month_number": month,
+        "first_weekday": first_weekday,  # 0=Mon, 6=Sun
+        "total_days": num_days,
+        "habit_id": habit_id,
+        "habit_name": selected_habit_name,
+        "active_habits_count": len(habits),
+        "days": days,
+        "summary": {
+            "total_active_habits": len(habits),
+            "recorded_days_count": len(recorded_days_set),
+            "completed": month_completed,
+            "missed": month_missed,
+            "skipped": month_skipped,
+            "completion_rate": month_rate
+        }
+    }
+
+
+def generate_weekly_review(target_date_str=None, db=None):
+    """
+    Phase 7: Weekly Progress Review Generator.
+    Analyzes actual records for the past 7 days ending at target_date,
+    comparing against the preceding 7-day period.
+    Identifies completion statistics, trends, strongest recorded days,
+    habits needing attention, and habits showing improvement.
+    Guards strictly against fabricating statistics when data is insufficient.
+    """
+    end_date = parse_target_date(target_date_str)
+    start_date = end_date - timedelta(days=6)
+    prev_end_date = start_date - timedelta(days=1)
+    prev_start_date = prev_end_date - timedelta(days=6)
+
+    cursor = db.execute("SELECT * FROM habits WHERE active = 1 ORDER BY id ASC")
+    active_habits = cursor.fetchall()
+
+    if not active_habits:
+        return {
+            "period": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "days": 7,
+                "prev_start_date": prev_start_date.isoformat(),
+                "prev_end_date": prev_end_date.isoformat()
+            },
+            "data_status": "no_data",
+            "message": "No active habits found. Create a habit to begin tracking.",
+            "statistics": {
+                "total_active_habits": 0,
+                "total_records": 0,
+                "completed": 0,
+                "missed": 0,
+                "skipped": 0,
+                "completion_rate": 0.0,
+                "previous_completion_rate": 0.0,
+                "rate_diff": 0.0,
+                "trend": "no_data"
+            },
+            "strongest_recorded_days": [],
+            "weakest_recorded_days": [],
+            "habits_needing_attention": [],
+            "habits_improving": [],
+            "strongest_habits": [],
+            "all_habits_review": []
+        }
+
+    # Query records for current week and previous week
+    curr_cursor = db.execute(
+        """
+        SELECT r.habit_id, r.record_date, r.status, h.name, h.category
+        FROM habit_records r
+        JOIN habits h ON r.habit_id = h.id
+        WHERE h.active = 1 AND r.record_date BETWEEN ? AND ?
+        ORDER BY r.record_date ASC
+        """,
+        (start_date.isoformat(), end_date.isoformat())
+    )
+    curr_records = curr_cursor.fetchall()
+
+    prev_cursor = db.execute(
+        """
+        SELECT r.habit_id, r.record_date, r.status
+        FROM habit_records r
+        JOIN habits h ON r.habit_id = h.id
+        WHERE h.active = 1 AND r.record_date BETWEEN ? AND ?
+        """,
+        (prev_start_date.isoformat(), prev_end_date.isoformat())
+    )
+    prev_records = prev_cursor.fetchall()
+
+    total_records = len(curr_records)
+    c_count = sum(1 for r in curr_records if r["status"] == "completed")
+    m_count = sum(1 for r in curr_records if r["status"] == "missed")
+    s_count = sum(1 for r in curr_records if r["status"] == "skipped")
+    eval_count = c_count + m_count
+    rate = round((c_count / eval_count * 100.0), 1) if eval_count > 0 else 0.0
+
+    prev_c_count = sum(1 for r in prev_records if r["status"] == "completed")
+    prev_m_count = sum(1 for r in prev_records if r["status"] == "missed")
+    prev_eval_count = prev_c_count + prev_m_count
+    prev_rate = round((prev_c_count / prev_eval_count * 100.0), 1) if prev_eval_count > 0 else 0.0
+
+    if prev_eval_count > 0:
+        rate_diff = round(rate - prev_rate, 1)
+        if rate_diff > 0:
+            trend = "improved"
+        elif rate_diff < 0:
+            trend = "declined"
+        else:
+            trend = "steady"
+    else:
+        rate_diff = 0.0
+        trend = "baseline"
+
+    # Assess data sufficiency
+    if total_records == 0:
+        data_status = "no_data"
+        message = "No habit check-ins recorded for this 7-day period."
+    elif total_records < 3:
+        data_status = "insufficient_data"
+        message = f"Insufficient data: only {total_records} record{'s' if total_records > 1 else ''} logged this week. At least 3 daily check-ins are recommended for a reliable weekly review."
+    else:
+        data_status = "sufficient_data"
+        message = f"Weekly summary calculated from {total_records} verified records across {len(active_habits)} active habit{'s' if len(active_habits) > 1 else ''}."
+
+    # Group by date for strongest/weakest recorded days
+    days_map = {}
+    curr = start_date
+    while curr <= end_date:
+        d_str = curr.isoformat()
+        days_map[d_str] = {
+            "date": d_str,
+            "day_name": curr.strftime("%A"),
+            "completed": 0,
+            "missed": 0,
+            "skipped": 0,
+            "total": 0
+        }
+        curr += timedelta(days=1)
+
+    for r in curr_records:
+        d_str = r["record_date"]
+        st = r["status"]
+        if d_str in days_map:
+            if st in days_map[d_str]:
+                days_map[d_str][st] += 1
+            days_map[d_str]["total"] += 1
+
+    for d_data in days_map.values():
+        e = d_data["completed"] + d_data["missed"]
+        d_data["rate"] = round((d_data["completed"] / e * 100.0), 1) if e > 0 else 0.0
+
+    # Strongest recorded days (at least 1 completion, sorted by rate then completed)
+    recorded_days_list = [d for d in days_map.values() if d["total"] > 0]
+    strongest_recorded_days = sorted(
+        [d for d in recorded_days_list if d["completed"] > 0],
+        key=lambda x: (x["rate"], x["completed"]),
+        reverse=True
+    )
+    weakest_recorded_days = sorted(
+        [d for d in recorded_days_list if d["missed"] > 0],
+        key=lambda x: (x["missed"], -x["rate"]),
+        reverse=True
+    )
+
+    # Per-habit analysis
+    habits_needing_attention = []
+    habits_improving = []
+    strongest_habits = []
+    all_habits_review = []
+
+    for h in active_habits:
+        hid = h["id"]
+        h_curr = [r for r in curr_records if r["habit_id"] == hid]
+        h_prev = [r for r in prev_records if r["habit_id"] == hid]
+
+        hc = sum(1 for r in h_curr if r["status"] == "completed")
+        hm = sum(1 for r in h_curr if r["status"] == "missed")
+        hs = sum(1 for r in h_curr if r["status"] == "skipped")
+        he = hc + hm
+        hrate = round((hc / he * 100.0), 1) if he > 0 else 0.0
+
+        hpc = sum(1 for r in h_prev if r["status"] == "completed")
+        hpm = sum(1 for r in h_prev if r["status"] == "missed")
+        hpe = hpc + hpm
+        hprate = round((hpc / hpe * 100.0), 1) if hpe > 0 else 0.0
+
+        current_streak = calculate_current_streak(hid, end_date, db)
+        best_streak = calculate_best_streak(hid, end_date, db)
+
+        h_info = {
+            "id": hid,
+            "name": h["name"],
+            "category": h["category"] or "General",
+            "completed": hc,
+            "missed": hm,
+            "skipped": hs,
+            "evaluated": he,
+            "completion_rate": hrate,
+            "prev_completion_rate": hprate,
+            "streak": current_streak,
+            "best_streak": best_streak
+        }
+        all_habits_review.append(h_info)
+
+        # Improvement detection
+        if hpe > 0 and he > 0 and hrate > hprate:
+            diff = round(hrate - hprate, 1)
+            habits_improving.append({
+                "id": hid,
+                "name": h["name"],
+                "category": h["category"] or "General",
+                "current_rate": hrate,
+                "prev_rate": hprate,
+                "diff": diff
+            })
+
+        # Needs attention detection
+        if hm >= 2 or (he >= 3 and hrate < 60.0):
+            reason = f"{hm} missed days" if hm >= 2 else f"Low completion rate ({hrate}%)"
+            habits_needing_attention.append({
+                "id": hid,
+                "name": h["name"],
+                "category": h["category"] or "General",
+                "missed": hm,
+                "rate": hrate,
+                "reason": reason
+            })
+
+        # Strongest habit detection
+        if (hrate >= 80.0 and hc >= 2) or current_streak >= 3:
+            strongest_habits.append({
+                "id": hid,
+                "name": h["name"],
+                "category": h["category"] or "General",
+                "rate": hrate,
+                "completed": hc,
+                "streak": current_streak
+            })
+
+    # Sort strongest habits by completion_rate, then streak, then completed
+    strongest_habits = sorted(strongest_habits, key=lambda x: (x["rate"], x["streak"], x["completed"]), reverse=True)
+
+    return {
+        "period": {
+            "start_date": start_date.isoformat(),
+            "end_date": end_date.isoformat(),
+            "days": 7,
+            "prev_start_date": prev_start_date.isoformat(),
+            "prev_end_date": prev_end_date.isoformat()
+        },
+        "data_status": data_status,
+        "message": message,
+        "statistics": {
+            "total_active_habits": len(active_habits),
+            "total_records": total_records,
+            "completed": c_count,
+            "missed": m_count,
+            "skipped": s_count,
+            "completion_rate": rate,
+            "previous_completion_rate": prev_rate,
+            "rate_diff": rate_diff,
+            "trend": trend
+        },
+        "strongest_recorded_days": strongest_recorded_days[:3],
+        "weakest_recorded_days": weakest_recorded_days[:3],
+        "habits_needing_attention": habits_needing_attention,
+        "habits_improving": habits_improving,
+        "strongest_habits": strongest_habits[:3],
+        "all_habits_review": all_habits_review
+    }
+
+
+def calculate_goals_and_milestones(target_date_str=None, habit_id=None, db=None):
+    """
+    Phase 7: Goals and Milestones Tracker.
+    Evaluates weekly completion targets for habits and tracks milestone achievements.
+    Guards against duplicate milestone notifications using the goal_milestones table.
+    """
+    ref_date = parse_target_date(target_date_str)
+    
+    # Calculate Monday to Sunday of the current week
+    week_start = ref_date - timedelta(days=ref_date.weekday())
+    week_end = week_start + timedelta(days=6)
+    period_str = f"{week_start.year}-W{week_start.isocalendar()[1]:02d}"
+
+    query = """
+        SELECT g.id as goal_id, g.habit_id, g.target_type, g.target_value, g.active,
+               h.name as habit_name, h.category, h.time_of_day, h.active as habit_active
+        FROM habit_goals g
+        JOIN habits h ON g.habit_id = h.id
+        WHERE g.active = 1 AND h.active = 1
+    """
+    params = []
+    if habit_id is not None:
+        query += " AND g.habit_id = ?"
+        params.append(habit_id)
+
+    query += " ORDER BY g.id ASC"
+    goals_rows = db.execute(query, tuple(params)).fetchall()
+
+    goals_result = []
+    new_milestones = []
+
+    for g in goals_rows:
+        gid = g["goal_id"]
+        hid = g["habit_id"]
+        t_val = g["target_value"]
+
+        # Count completed records in current week
+        rec_cursor = db.execute(
+            """
+            SELECT COUNT(*) as completed_count
+            FROM habit_records
+            WHERE habit_id = ? AND status = 'completed' AND record_date BETWEEN ? AND ?
+            """,
+            (hid, week_start.isoformat(), week_end.isoformat())
+        )
+        completed_count = rec_cursor.fetchone()["completed_count"]
+        progress_pct = min(100.0, round((completed_count / t_val * 100.0), 1)) if t_val > 0 else 0.0
+        is_achieved = (completed_count >= t_val)
+        remaining = max(0, t_val - completed_count)
+
+        milestone_info = None
+        has_new_milestone = False
+
+        if is_achieved:
+            # Check if milestone is already recorded in database
+            m_row = db.execute(
+                """
+                SELECT id, notified, achieved_at
+                FROM goal_milestones
+                WHERE habit_id = ? AND milestone_type = 'weekly_target_achieved' AND milestone_period = ?
+                """,
+                (hid, period_str)
+            ).fetchone()
+
+            if m_row is None:
+                # Insert milestone record
+                m_cursor = db.execute(
+                    """
+                    INSERT INTO goal_milestones (goal_id, habit_id, milestone_type, milestone_period, achieved_at, notified)
+                    VALUES (?, ?, 'weekly_target_achieved', ?, CURRENT_TIMESTAMP, 0)
+                    """,
+                    (gid, hid, period_str)
+                )
+                db.commit()
+                mid = m_cursor.lastrowid
+                has_new_milestone = True
+                milestone_info = {
+                    "id": mid,
+                    "goal_id": gid,
+                    "habit_id": hid,
+                    "habit_name": g["habit_name"],
+                    "type": "weekly_target_achieved",
+                    "title": f"Goal Achieved: {g['habit_name']}",
+                    "message": f"Hit weekly target of {t_val} completions ({completed_count}/{t_val}) for week {period_str}!",
+                    "period": period_str,
+                    "notified": 0
+                }
+                new_milestones.append(milestone_info)
+            else:
+                milestone_info = {
+                    "id": m_row["id"],
+                    "goal_id": gid,
+                    "habit_id": hid,
+                    "habit_name": g["habit_name"],
+                    "type": "weekly_target_achieved",
+                    "title": f"Goal Achieved: {g['habit_name']}",
+                    "message": f"Hit weekly target of {t_val} completions ({completed_count}/{t_val}) for week {period_str}!",
+                    "period": period_str,
+                    "notified": m_row["notified"]
+                }
+                if m_row["notified"] == 0:
+                    has_new_milestone = True
+                    new_milestones.append(milestone_info)
+
+        goals_result.append({
+            "id": gid,
+            "habit_id": hid,
+            "habit_name": g["habit_name"],
+            "category": g["category"] or "General",
+            "time_of_day": g["time_of_day"] if "time_of_day" in g.keys() and g["time_of_day"] else "Morning",
+            "target_value": t_val,
+            "target_type": g["target_type"],
+            "completed_this_week": completed_count,
+            "progress_percentage": progress_pct,
+            "is_achieved": is_achieved,
+            "remaining": remaining,
+            "week_start": week_start.isoformat(),
+            "week_end": week_end.isoformat(),
+            "week_period": period_str,
+            "has_new_milestone": has_new_milestone,
+            "milestone": milestone_info
+        })
+
+    return {
+        "goals": goals_result,
+        "new_milestones": new_milestones,
+        "week_period": period_str,
+        "week_start": week_start.isoformat(),
+        "week_end": week_end.isoformat()
+    }
+

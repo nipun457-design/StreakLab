@@ -17,7 +17,14 @@ import logging
 import sqlite3
 from datetime import datetime, timedelta, date
 from flask import Flask, render_template, jsonify, request, g
-from pattern_engine import analyze_habit_patterns, analyze_single_habit, get_habit_analytics
+from pattern_engine import (
+    analyze_habit_patterns,
+    analyze_single_habit,
+    get_habit_analytics,
+    get_calendar_heatmap,
+    generate_weekly_review,
+    calculate_goals_and_milestones
+)
 import ai_explainer
 
 logger = logging.getLogger("streaklab.app")
@@ -104,6 +111,40 @@ def init_db():
         # Performance indices for fast queries on habit history and date lookups
         conn.execute("CREATE INDEX IF NOT EXISTS idx_records_habit_date ON habit_records (habit_id, record_date);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_records_date ON habit_records (record_date);")
+
+        # Table 3: habit_goals (Phase 7: Weekly Completion Targets)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS habit_goals (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                habit_id INTEGER NOT NULL,
+                target_type TEXT NOT NULL DEFAULT 'weekly_completions',
+                target_value INTEGER NOT NULL CHECK(target_value >= 1 AND target_value <= 7),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                active INTEGER DEFAULT 1,
+                FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
+                UNIQUE (habit_id, target_type)
+            );
+        """)
+
+        # Table 4: goal_milestones (Phase 7: Achieved Milestones & Duplicate Prevention)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS goal_milestones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                goal_id INTEGER NOT NULL,
+                habit_id INTEGER NOT NULL,
+                milestone_type TEXT NOT NULL,
+                milestone_period TEXT NOT NULL,
+                achieved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                notified INTEGER DEFAULT 0,
+                FOREIGN KEY (goal_id) REFERENCES habit_goals (id) ON DELETE CASCADE,
+                FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
+                UNIQUE (habit_id, milestone_type, milestone_period)
+            );
+        """)
+
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_goals_habit ON habit_goals (habit_id);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_lookup ON goal_milestones (habit_id, milestone_period);")
     conn.close()
 
 
@@ -755,6 +796,231 @@ def get_analytics():
 
 
 # ---------------------------------------------------------------------------
+# PHASE 7: HABIT CALENDAR HEATMAP, WEEKLY REVIEW, AND GOALS REST API ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.route('/api/calendar', methods=['GET'])
+def get_calendar_heatmap_api():
+    """
+    Phase 7: Calendar Heatmap API.
+    Returns month calendar grid with day-by-day habit records and dominant status.
+    Query parameters:
+      - month: YYYY-MM (e.g. 2026-10, defaults to current month)
+      - habit_id: optional integer to filter by habit
+      - date: reference date YYYY-MM-DD (defaults to today)
+    """
+    month = request.args.get('month')
+    habit_id_raw = request.args.get('habit_id')
+    habit_id = None
+    if habit_id_raw is not None and habit_id_raw != '':
+        try:
+            habit_id = int(habit_id_raw)
+        except (ValueError, TypeError):
+            return jsonify({"error": "habit_id must be a valid integer"}), 400
+
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+
+    # Validate month format if provided
+    if month:
+        parts = month.strip().split("-")
+        if len(parts) != 2:
+            return jsonify({"error": "Invalid month format. Expected YYYY-MM"}), 400
+        try:
+            y, m = int(parts[0]), int(parts[1])
+            if y < 1900 or y > 2100 or m < 1 or m > 12:
+                return jsonify({"error": "Month or year out of range"}), 400
+        except ValueError:
+            return jsonify({"error": "Invalid month format. Expected YYYY-MM"}), 400
+
+    db = get_db()
+    if habit_id is not None:
+        habit = db.execute("SELECT id FROM habits WHERE id = ?", (habit_id,)).fetchone()
+        if not habit:
+            return jsonify({"error": "Habit not found"}), 404
+
+    result = get_calendar_heatmap(month_str=month, habit_id=habit_id, target_date_str=target_date, db=db)
+    return jsonify(result), 200
+
+
+@app.route('/api/reviews/weekly', methods=['GET'])
+def get_weekly_review_api():
+    """
+    Phase 7: Weekly Progress Review API.
+    Returns 7-day completion review, comparisons, strongest days, habits needing attention,
+    and hybrid AI explanation.
+    Query parameters:
+      - date: reference date YYYY-MM-DD (defaults to today)
+      - explain: boolean (default true)
+    """
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+
+    explain = request.args.get('explain', 'true').lower() in ('true', '1')
+
+    db = get_db()
+    review_data = generate_weekly_review(target_date_str=target_date, db=db)
+
+    explanation = None
+    if explain:
+        explanation = ai_explainer.explain_weekly_review(review_data)
+
+    review_data["explanation"] = explanation
+    return jsonify(review_data), 200
+
+
+@app.route('/api/goals', methods=['GET'])
+def get_goals_api():
+    """
+    Phase 7: Goals & Milestones API.
+    Returns weekly targets, current progress, achievement flags, and milestone details.
+    Query parameters:
+      - date: reference date YYYY-MM-DD (defaults to today)
+      - habit_id: optional integer to filter by single habit
+    """
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+
+    habit_id_raw = request.args.get('habit_id')
+    habit_id = None
+    if habit_id_raw is not None and habit_id_raw != '':
+        try:
+            habit_id = int(habit_id_raw)
+        except (ValueError, TypeError):
+            return jsonify({"error": "habit_id must be a valid integer"}), 400
+
+    db = get_db()
+    if habit_id is not None:
+        habit = db.execute("SELECT id FROM habits WHERE id = ?", (habit_id,)).fetchone()
+        if not habit:
+            return jsonify({"error": "Habit not found"}), 404
+
+    result = calculate_goals_and_milestones(target_date_str=target_date, habit_id=habit_id, db=db)
+    return jsonify(result), 200
+
+
+@app.route('/api/goals', methods=['POST'])
+def save_goal_api():
+    """
+    Phase 7: Set or update a habit's weekly completion target.
+    Expects JSON: { "habit_id": int, "target_value": int (1-7) }
+    """
+    if not request.is_json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    data = request.get_json() or {}
+    habit_id = data.get('habit_id')
+    target_value = data.get('target_value')
+
+    if habit_id is None:
+        return jsonify({"error": "habit_id is required"}), 400
+    try:
+        habit_id = int(habit_id)
+    except (ValueError, TypeError):
+        return jsonify({"error": "habit_id must be an integer"}), 400
+
+    if target_value is None:
+        return jsonify({"error": "target_value is required"}), 400
+    try:
+        target_value = int(target_value)
+        if target_value < 1 or target_value > 7:
+            return jsonify({"error": "target_value must be an integer between 1 and 7"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "target_value must be a valid integer between 1 and 7"}), 400
+
+    db = get_db()
+    habit = db.execute("SELECT id, name FROM habits WHERE id = ?", (habit_id,)).fetchone()
+    if not habit:
+        return jsonify({"error": "Habit not found"}), 404
+
+    # Check if goal already exists for this habit
+    existing = db.execute(
+        "SELECT id FROM habit_goals WHERE habit_id = ? AND target_type = 'weekly_completions'",
+        (habit_id,)
+    ).fetchone()
+
+    if existing:
+        db.execute("""
+            UPDATE habit_goals
+            SET target_value = ?, active = 1, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (target_value, existing["id"]))
+        db.commit()
+        goal_id = existing["id"]
+        status_code = 200
+    else:
+        cursor = db.execute("""
+            INSERT INTO habit_goals (habit_id, target_type, target_value, active)
+            VALUES (?, 'weekly_completions', ?, 1)
+        """, (habit_id, target_value))
+        db.commit()
+        goal_id = cursor.lastrowid
+        status_code = 201
+
+    # Return calculated progress for this goal
+    progress_data = calculate_goals_and_milestones(habit_id=habit_id, db=db)
+    matched_goals = [g for g in progress_data.get("goals", []) if g["id"] == goal_id]
+    goal_payload = matched_goals[0] if matched_goals else {"id": goal_id, "habit_id": habit_id, "target_value": target_value}
+
+    return jsonify(goal_payload), status_code
+
+
+@app.route('/api/goals/<int:goal_id>', methods=['DELETE'])
+def delete_goal_api(goal_id):
+    """
+    Phase 7: Deactivates or removes a habit goal.
+    """
+    db = get_db()
+    existing = db.execute("SELECT id FROM habit_goals WHERE id = ?", (goal_id,)).fetchone()
+    if not existing:
+        return jsonify({"error": "Goal not found"}), 404
+
+    db.execute("UPDATE habit_goals SET active = 0 WHERE id = ?", (goal_id,))
+    db.commit()
+    return jsonify({"message": "Goal removed successfully", "id": goal_id}), 200
+
+
+@app.route('/api/milestones/acknowledge', methods=['POST'])
+def acknowledge_milestone_api():
+    """
+    Phase 7: Acknowledges milestone notifications to prevent duplicate alerts.
+    Expects JSON: { "milestone_id": int } or { "milestone_ids": [int, ...] }
+    """
+    if not request.is_json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    data = request.get_json() or {}
+    ids = []
+    if 'milestone_id' in data:
+        try:
+            ids.append(int(data['milestone_id']))
+        except (ValueError, TypeError):
+            return jsonify({"error": "milestone_id must be an integer"}), 400
+    elif 'milestone_ids' in data:
+        raw_ids = data.get('milestone_ids')
+        if not isinstance(raw_ids, list):
+            return jsonify({"error": "milestone_ids must be a list"}), 400
+        for m in raw_ids:
+            try:
+                ids.append(int(m))
+            except (ValueError, TypeError):
+                continue
+
+    if not ids:
+        return jsonify({"error": "No valid milestone IDs provided"}), 400
+
+    db = get_db()
+    placeholders = ",".join("?" for _ in ids)
+    db.execute(f"UPDATE goal_milestones SET notified = 1 WHERE id IN ({placeholders})", tuple(ids))
+    db.commit()
+
+    return jsonify({"message": "Milestones acknowledged", "acknowledged_ids": ids}), 200
+
+
+# ---------------------------------------------------------------------------
 # PHASE 6: AI HABIT COACH CHAT REST API ENDPOINT
 # ---------------------------------------------------------------------------
 
@@ -877,12 +1143,15 @@ with app.app_context():
 
 if __name__ == '__main__':
     print("\n" + "=" * 60)
-    print("[*] Starting StreakLab Flask Backend with SQLite (Phase 6)...")
+    print("[*] Starting StreakLab Flask Backend with SQLite (Phase 7)...")
     print(f"[*] Database Path : {app.config['DATABASE']}")
     print("[*] Dashboard URL  : http://127.0.0.1:5000")
     print("[*] Health API    : http://127.0.0.1:5000/api/health")
     print("[*] Habits API    : http://127.0.0.1:5000/api/habits")
     print("[*] Insights API  : http://127.0.0.1:5000/api/insights/explanations")
     print("[*] Chat API      : http://127.0.0.1:5000/api/chat")
+    print("[*] Calendar API  : http://127.0.0.1:5000/api/calendar")
+    print("[*] Weekly Review : http://127.0.0.1:5000/api/reviews/weekly")
+    print("[*] Goals API     : http://127.0.0.1:5000/api/goals")
     print("=" * 60 + "\n")
     app.run(debug=True, host='127.0.0.1', port=5000)

@@ -1,33 +1,25 @@
-warning: in the working copy of '.gitignore', LF will be replaced by CRLF the next time Git touches it
-[1mdiff --git a/.gitignore b/.gitignore[m
-[1mindex 0f0ff80..b0fbd4a 100644[m
-[1m--- a/.gitignore[m
-[1m+++ b/.gitignore[m
-[36m@@ -1,5 +1,27 @@[m
-[32m+[m[32m# Python bytecode & cache[m
- __pycache__/[m
-[32m+[m[32m*.py[cod][m
-[32m+[m[32m*$py.class[m
-[32m+[m[32m.pytest_cache/[m
-[32m+[m
-[32m+[m[32m# Virtual environments[m
- venv/[m
- .venv/[m
-[32m+[m[32menv/[m
-[32m+[m[32mENV/[m
-[32m+[m
-[32m+[m[32m# Local environment secrets & API credentials (NEVER commit)[m
- .env[m
-[32m+[m[32m.env.local[m
-[32m+[m[32m.env.*.local[m
-[32m+[m
-[32m+[m[32m# SQLite databases & runtime instances[m
- instance/[m
-[32m+[m[32m*.db[m
-[32m+[m[32m*.sqlite3[m
-[32m+[m
-[32m+[m[32m# IDE & Editor folders[m
-[32m+[m[32m.vscode/[m
-[32m+[m[32m.idea/[m
-[32m+[m[32m*.swp[m
-[32m+[m[32m*~[m
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'ai_explainer.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/ARCHITECTURE.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/TESTING.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'pattern_engine.py', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'static/script.js', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'static/style.css', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'templates/index.html', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'test_app.py', LF will be replaced by CRLF the next time Git touches it
+ai_explainer.py:1269: new blank line at EOF.
+pattern_engine.py:840: trailing whitespace.
+[32m+[m[41m    [m
+pattern_engine.py:848: trailing whitespace.
+[32m+[m[41m    [m
+pattern_engine.py:1275: trailing whitespace.
+[32m+[m[41m    [m
+pattern_engine.py:1398: new blank line at EOF.
+static/script.js:1873: trailing whitespace.
+[32m+[m[32m      <div[m[41m [m
+static/script.js:2318: new blank line at EOF.
+static/style.css:1079: new blank line at EOF.
+templates/index.html:377: trailing whitespace.
+[32m+[m[41m      [m
+test_app.py:1688: new blank line at EOF.
