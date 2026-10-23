@@ -69,10 +69,12 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
 * **Schema**:
   * `habits`: `id` (PK), `name`, `description`, `category`, `time_of_day`, `target_time`, `target_frequency`, `created_at`, `active`.
   * `habit_records`: `id` (PK), `habit_id` (FK -> habits.id ON DELETE CASCADE), `record_date`, `status` (`completed`, `missed`, `skipped`), `created_at`, `updated_at`.
-  * `habit_goals` (Phase 7): `id` (PK), `habit_id` (FK -> habits.id ON DELETE CASCADE), `target_type` ('weekly_frequency'), `target_value` (1-7), `start_date`, `active`, `created_at`, `updated_at`.
-  * `goal_milestones` (Phase 7): `id` (PK), `goal_id` (FK -> habit_goals.id ON DELETE CASCADE), `habit_id` (FK -> habits.id ON DELETE CASCADE), `milestone_type` ('target_reached', 'streak_3', 'streak_7', 'streak_14', 'streak_30'), `milestone_period` (e.g. '2026-W43'), `achieved_at`, `notified`, `created_at`.
+  * `habit_goals` (Phase 7 & 8): `id` (PK), `habit_id` (FK -> habits.id ON DELETE CASCADE), `target_type` ('weekly_completions', 'target_streak', 'total_completions'), `target_value` (CHECK >= 1), `created_at`, `updated_at`, `active`, `end_date` (TEXT DEFAULT NULL).
+    - **Constraint**: `UNIQUE(habit_id, target_type)` guarantees single goal type per habit.
+  * `goal_milestones` (Phase 7 & 8): `id` (PK), `goal_id` (FK -> habit_goals.id ON DELETE CASCADE), `habit_id` (FK -> habits.id ON DELETE CASCADE), `milestone_type` ('target_reached', 'streak_3', 'streak_7', 'streak_14', 'streak_30'), `milestone_period` (e.g. '2026-W43'), `achieved_at`, `notified`.
     - **Constraint**: `UNIQUE(habit_id, milestone_type, milestone_period)` guarantees duplicate notifications are physically prevented at the database level.
-  * `indices`: `idx_records_habit_date`, `idx_records_date`, `idx_goals_habit`, `idx_milestones_habit_period`.
+  * `habit_reminders` (Phase 8): `id` (PK), `habit_id` (UNIQUE FK -> habits.id ON DELETE CASCADE), `reminder_time` (24-hr `HH:MM`), `enabled` (0/1), `created_at`, `updated_at`.
+  * `indices`: `idx_records_habit_date`, `idx_records_date`, `idx_goals_habit`, `idx_milestones_lookup`, `idx_reminders_habit`.
 
 ### Component 4: Rule-Based Statistical Pattern Engine
 * **File**: `pattern_engine.py`
@@ -83,7 +85,8 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
   * Assigns qualitative confidence levels (`low`, `medium`, `high`) based on sample sizes.
   * **Phase 7 Calendar Heatmap (`get_calendar_heatmap`)**: Computes day-by-day status breakdown (`completed`, `partial`, `missed`, `skipped`, `unrecorded`, `future`, `today`), percentage completion, and day inspection details.
   * **Phase 7 Weekly Review (`generate_weekly_review`)**: Evaluates a 7-day period against previous 7-day baseline, identifies strongest/weakest days, top habits, habits needing attention, and assigns strict `data_status` (`no_data`, `insufficient_data`, `sufficient_data`).
-  * **Phase 7 Goals & Milestones (`calculate_goals_and_milestones`)**: Evaluates active weekly targets against actual SQLite completions, determines milestone achievements, and logs un-notified milestone rows safely.
+  * **Phase 7 & 8 Goals & Milestones (`calculate_goals_and_milestones`)**: Evaluates active weekly, streak, and total targets against actual SQLite completions, determines milestone achievements, distinguishes active/completed/overdue states, and logs un-notified milestone rows safely.
+  * **Phase 8 Multi-Period Progress Reports (`generate_progress_report`)**: Evaluates daily, weekly, or calendar-month windows, aggregates completion rates and streak records, identifies high-performing and at-risk habits, and handles empty datasets without speculatively fabricating counts.
 
 ### Component 5: Hybrid AI Explainer & Local Fallback
 * **File**: `ai_explainer.py`
@@ -95,6 +98,7 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
   * Automatically switches to deterministic local fallback on network errors, timeouts, or missing API keys.
   * Implements an in-memory TTL cache (5 minutes) keyed by an evidence fingerprint.
   * **Phase 7 Weekly Review Explainer (`explain_weekly_review`)**: Explains weekly progress with strengths, habits needing attention, and recommendations; preserves `insufficient_data` boundary without speculating.
+  * **Phase 8 Coach Grounding**: Context retrieval includes active configured reminders and report metrics to answer user questions about schedules and targets.
 
 ### Component 6: Real AI Habit Coach Chatbox (Phase 6)
 * **Files**: `templates/index.html` (modal & launcher), `static/style.css` (chat drawer styling), `static/script.js` (DOM-safe chat rendering & session management), `app.py` (`POST /api/chat`), `ai_explainer.py` (`chat_with_coach`)
@@ -102,7 +106,7 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
   * Provides an interactive floating chat assistant on the dashboard.
   * Accepts natural-language questions and bounded conversation history (`POST /api/chat`).
   * Enforces sliding-window in-memory IP rate limiting (30 requests/minute) to prevent spam and abuse.
-  * Dynamically extracts the user's active habits, today's completion status, 7-day/30-day rates, detected pattern evidence, and active weekly goals from SQLite.
+  * Dynamically extracts the user's active habits, today's completion status, 7-day/30-day rates, detected pattern evidence, active weekly goals, and reminders from SQLite.
   * Passes verified context to Google Gemini or OpenAI with strict system instructions prohibiting statistical hallucination.
   * Uses deterministic rule-based local coach fallback when offline or unconfigured.
   * Renders responses strictly using `textContent` and safe DOM text nodes, guaranteeing complete XSS immunity.
@@ -113,6 +117,14 @@ StreakLab is designed around a **hybrid, decoupled architecture** that separates
   * **Habit Calendar Heatmap**: Displays an accessible CSS-grid month view with color-coded day cells, month navigation (`Prev` / `Next`), habit filter dropdown, dynamic legend, and clickable date inspection modal displaying habit-by-habit status.
   * **Weekly Progress Review**: Renders structured weekly KPI summary boxes (completion rate, previous week comparison, trend badges), strongest days badge chips, habits needing attention, and AI Coach explanation card with an "Ask AI Coach to explain this review" shortcut into the chat drawer.
   * **Goals and Milestones**: Enables setting weekly completion targets (1–7 days/week) per habit via modal, displays live visual progress bars, highlights achieved targets and streak milestones, and lets users acknowledge celebration banners (`POST /api/milestones/acknowledge`).
+
+### Component 8: Smart Reminders, Reports & Secure CSV Export (Phase 8)
+* **Files**: `templates/index.html`, `static/style.css`, `static/script.js`, `app.py`, `pattern_engine.py`
+* **Responsibilities**:
+  * **Smart Reminders**: Habit card reminder chips, time picker modal, 60s ticker checking local scheduled time, suppression when habit completed today or already alerted, user-gesture permission request, and visible in-app alert banner fallback (`#inAppReminderAlertContainer`).
+  * **Enhanced Goals**: Editable targets (`PUT /api/goals/<id>`), multiple measurable target types (`weekly_completions`, `target_streak`, `total_completions`), deadline dates (`end_date`), and active/completed/overdue badge statuses.
+  * **Progress Reports**: Responsive daily, weekly, and monthly reports with KPI cards, habit breakdown tables, streak counts, and transparent highlight rules.
+  * **Secure CSV Export**: Exports Habits, Records, Goals, and Reports encoded with UTF-8 BOM (`utf-8-sig`) for Excel, with sanitization (`sanitize_csv_field`) defusing spreadsheet formula injection (`=`, `+`, `-`, `@`, `\t`, `\r`).
 
 ---
 
@@ -185,3 +197,5 @@ sequenceDiagram
 4. **No Leakage of Secrets**: API keys and raw error traces are strictly kept on the server and are never returned in JSON error responses or client payloads.
 5. **Non-Destructive Persistence**: Deactivating a habit sets `active = 0`, keeping historical records intact for analytics while hiding it from active daily tracking.
 6. **No Dangerous Evaluation**: The frontend uses `escapeHtml()` and DOM property bindings (`textContent`), avoiding `eval()` or unescaped HTML injection. User and AI chat bubbles are constructed purely with safe DOM text nodes.
+7. **Spreadsheet Formula Injection Defense**: All exported CSV text cells are processed through `sanitize_csv_field()`. Any field starting with formula execution triggers (`=`, `+`, `-`, `@`, `\t`, `\r`) is prepended with a single quote (`'`), preventing remote code execution or data exfiltration in Microsoft Excel and Google Sheets.
+8. **User Gesture Notification Permission**: Web Notifications API permission requests are strictly bound to explicit user gestures (clicking the "Enable Browser Notifications" button in settings), complying with modern browser anti-spam policies. In-app alert banners serve as a fallback when permissions are denied or unsupported.

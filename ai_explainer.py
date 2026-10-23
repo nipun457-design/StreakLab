@@ -701,7 +701,7 @@ def get_coach_context(db):
         for p in patterns_summary:
             lines.append(f"- {p['title']}: {p['message']} Tip: {p['recommendation']}")
 
-    # Phase 7: Fetch Goals & Milestones
+    # Phase 7 & 8: Fetch Goals & Milestones
     active_goals = []
     try:
         goals_data = pattern_engine.calculate_goals_and_milestones(target_date_str=today_str, db=db)
@@ -714,6 +714,24 @@ def get_coach_context(db):
     except Exception:
         active_goals = []
 
+    # Phase 8: Fetch Configured Reminders
+    active_reminders = []
+    try:
+        rem_cursor = db.execute("""
+            SELECT r.reminder_time, r.enabled, h.name as habit_name
+            FROM habit_reminders r
+            JOIN habits h ON r.habit_id = h.id
+            WHERE r.enabled = 1 AND h.active = 1
+            ORDER BY r.reminder_time ASC
+        """)
+        active_reminders = [dict(row) for row in rem_cursor.fetchall()]
+        if active_reminders:
+            lines.append("\nConfigured Habit Reminders:")
+            for rem in active_reminders:
+                lines.append(f"- \"{rem['habit_name']}\" at {rem['reminder_time']}")
+    except Exception:
+        active_reminders = []
+
     return {
         "total_habits": len(active_habits),
         "today_completed": today_completed_count,
@@ -722,6 +740,7 @@ def get_coach_context(db):
         "summary_30d": sum_30d,
         "patterns": patterns_summary,
         "goals": active_goals,
+        "reminders": active_reminders,
         "text_summary": "\n".join(lines)
     }
 
@@ -888,6 +907,34 @@ def generate_chat_fallback(message, context):
             {"label": "30-Day Pace", "value": f"{rate_30d}%"},
             {"label": "Trend Gap", "value": f"{'+' if diff >= 0 else ''}{diff}%"}
         ]
+        return {"reply": reply, "source": "fallback", "evidence": evidence}
+
+    # Intent 6: Reminders and Notifications
+    elif any(k in msg_lower for k in ("reminder", "notify", "notification", "alarm")):
+        reminders = context.get("reminders", [])
+        if reminders:
+            rem_bullets = "\n".join([f"• **{r['habit_name']}:** Scheduled for **{r['reminder_time']}**" for r in reminders])
+            reply = (
+                f"Here are your configured habit reminders:\n\n"
+                f"{rem_bullets}\n\n"
+                f"🔔 *Note: Browser notifications require StreakLab to be open in an active tab.*"
+            )
+            evidence = [{"label": "Active Reminders", "value": str(len(reminders))}]
+        else:
+            reply = (
+                "You haven't set up any habit reminders yet! "
+                "You can configure a reminder time (e.g. 08:30 AM) for any habit directly from the dashboard."
+            )
+            evidence = [{"label": "Active Reminders", "value": "0"}]
+        return {"reply": reply, "source": "fallback", "evidence": evidence}
+
+    # Intent: Reports and CSV Data Export
+    elif any(k in msg_lower for k in ("report", "daily report", "monthly report", "export", "csv", "download data")):
+        reply = (
+            f"You can view your **Daily, Weekly, and Monthly Progress Reports** directly on the dashboard, "
+            f"or download comprehensive CSV records (Habits, Check-in History, Goals, and Reports) using the **Data Export** card."
+        )
+        evidence = [{"label": "Active Habits", "value": str(total_habits)}]
         return {"reply": reply, "source": "fallback", "evidence": evidence}
 
     # Intent 7: Greeting

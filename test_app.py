@@ -1682,9 +1682,367 @@ class StreakLabTestCase(unittest.TestCase):
         self.assertIn("Goal Chat Habit", reply)
         self.assertIn("Target 5 days/week", reply)
 
+    # -----------------------------------------------------------------------
+    # 8. PHASE 8: SMART REMINDERS & NOTIFICATIONS TESTS
+    # -----------------------------------------------------------------------
+    def test_phase8_create_and_get_reminder(self):
+        """POST /api/reminders creates a reminder and GET /api/reminders retrieves it."""
+        h1 = self.client.post('/api/habits', json={"name": "Morning Yoga", "category": "Fitness"}).get_json()['id']
+
+        # Create reminder
+        res = self.client.post('/api/reminders', json={
+            "habit_id": h1,
+            "reminder_time": "07:30",
+            "enabled": True
+        })
+        self.assertIn(res.status_code, [200, 201])
+        data = res.get_json()
+        self.assertEqual(data["habit_id"], h1)
+        self.assertEqual(data["reminder_time"], "07:30")
+        self.assertEqual(data["enabled"], 1)
+
+        # GET /api/reminders
+        get_res = self.client.get('/api/reminders')
+        self.assertEqual(get_res.status_code, 200)
+        reminders = get_res.get_json()
+        self.assertEqual(len(reminders), 1)
+        self.assertEqual(reminders[0]["habit_id"], h1)
+        self.assertEqual(reminders[0]["reminder_time"], "07:30")
+        self.assertEqual(reminders[0]["is_completed_today"], False)
+
+        # GET /api/habits should include reminder object
+        habits_res = self.client.get('/api/habits')
+        self.assertEqual(habits_res.status_code, 200)
+        habits_data = habits_res.get_json()
+        self.assertIsNotNone(habits_data[0].get("reminder"))
+        self.assertEqual(habits_data[0]["reminder"]["reminder_time"], "07:30")
+
+    def test_phase8_reminder_time_validation(self):
+        """POST /api/reminders validates 24-hr time format and required fields."""
+        h1 = self.client.post('/api/habits', json={"name": "Test Habit", "category": "Coding"}).get_json()['id']
+
+        # Missing reminder_time
+        res1 = self.client.post('/api/reminders', json={"habit_id": h1})
+        self.assertEqual(res1.status_code, 400)
+
+        # Invalid hour (> 23)
+        res2 = self.client.post('/api/reminders', json={"habit_id": h1, "reminder_time": "25:00"})
+        self.assertEqual(res2.status_code, 400)
+
+        # Invalid minute (> 59)
+        res3 = self.client.post('/api/reminders', json={"habit_id": h1, "reminder_time": "12:65"})
+        self.assertEqual(res3.status_code, 400)
+
+        # Missing leading zero (e.g. 7:30 instead of 07:30)
+        res4 = self.client.post('/api/reminders', json={"habit_id": h1, "reminder_time": "7:30"})
+        self.assertEqual(res4.status_code, 400)
+
+        # Nonexistent habit ID
+        res5 = self.client.post('/api/reminders', json={"habit_id": 99999, "reminder_time": "08:00"})
+        self.assertEqual(res5.status_code, 404)
+
+    def test_phase8_reminder_update_and_disable(self):
+        """PUT /api/reminders/<habit_id> edits time and enabled status."""
+        h1 = self.client.post('/api/habits', json={"name": "Read Book", "category": "Learning"}).get_json()['id']
+        self.client.post('/api/reminders', json={"habit_id": h1, "reminder_time": "20:00", "enabled": True})
+
+        # Update to 21:15 and disable
+        put_res = self.client.put(f'/api/reminders/{h1}', json={
+            "reminder_time": "21:15",
+            "enabled": False
+        })
+        self.assertEqual(put_res.status_code, 200)
+        data = put_res.get_json()
+        self.assertEqual(data["reminder_time"], "21:15")
+        self.assertEqual(data["enabled"], 0)
+
+        # Verify via GET
+        get_res = self.client.get('/api/reminders')
+        rem = get_res.get_json()[0]
+        self.assertEqual(rem["reminder_time"], "21:15")
+        self.assertEqual(rem["enabled"], 0)
+
+    def test_phase8_reminder_delete(self):
+        """DELETE /api/reminders/<habit_id> removes configured reminder."""
+        h1 = self.client.post('/api/habits', json={"name": "Meditate", "category": "Mindfulness"}).get_json()['id']
+        self.client.post('/api/reminders', json={"habit_id": h1, "reminder_time": "06:45"})
+
+        del_res = self.client.delete(f'/api/reminders/{h1}')
+        self.assertEqual(del_res.status_code, 200)
+
+        get_res = self.client.get('/api/reminders')
+        self.assertEqual(len(get_res.get_json()), 0)
+
+    def test_phase8_reminder_completed_today_flag(self):
+        """GET /api/reminders accurately reflects whether habit is completed today."""
+        today = date.today().isoformat()
+        h1 = self.client.post('/api/habits', json={"name": "Drink Water", "category": "Health"}).get_json()['id']
+        self.client.post('/api/reminders', json={"habit_id": h1, "reminder_time": "10:00"})
+
+        # Initially not completed
+        res1 = self.client.get('/api/reminders')
+        self.assertFalse(res1.get_json()[0]["is_completed_today"])
+
+        # Mark completed today
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": today, "status": "completed"})
+
+        # Now is_completed_today is True
+        res2 = self.client.get('/api/reminders')
+        self.assertTrue(res2.get_json()[0]["is_completed_today"])
+
+    # -----------------------------------------------------------------------
+    # 9. PHASE 8: GOALS & MILESTONES ENHANCEMENTS
+    # -----------------------------------------------------------------------
+    def test_phase8_goal_streak_and_total_targets(self):
+        """Goals support target_streak and total_completions beyond weekly (1-7)."""
+        h1 = self.client.post('/api/habits', json={"name": "Coding Mastery", "category": "Coding"}).get_json()['id']
+
+        # 1. Target streak goal
+        res_streak = self.client.post('/api/goals', json={
+            "habit_id": h1,
+            "target_type": "target_streak",
+            "target_value": 14
+        })
+        self.assertEqual(res_streak.status_code, 201)
+        streak_data = res_streak.get_json()
+        self.assertEqual(streak_data["target_type"], "target_streak")
+        self.assertEqual(streak_data["target_value"], 14)
+
+        # 2. Total completions goal
+        h2 = self.client.post('/api/habits', json={"name": "100 Pushups", "category": "Fitness"}).get_json()['id']
+        res_total = self.client.post('/api/goals', json={
+            "habit_id": h2,
+            "target_type": "total_completions",
+            "target_value": 50
+        })
+        self.assertEqual(res_total.status_code, 201)
+        total_data = res_total.get_json()
+        self.assertEqual(total_data["target_type"], "total_completions")
+        self.assertEqual(total_data["target_value"], 50)
+
+    def test_phase8_goal_overdue_status(self):
+        """Goal past end_date that has not met target is flagged as overdue."""
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        h1 = self.client.post('/api/habits', json={"name": "Overdue Goal Habit", "category": "Learning"}).get_json()['id']
+
+        # Create goal with yesterday deadline
+        self.client.post('/api/goals', json={
+            "habit_id": h1,
+            "target_type": "total_completions",
+            "target_value": 10,
+            "end_date": yesterday
+        })
+
+        goals_res = self.client.get('/api/goals')
+        self.assertEqual(goals_res.status_code, 200)
+        goal = goals_res.get_json()["goals"][0]
+        self.assertEqual(goal["status"], "overdue")
+        self.assertFalse(goal["is_achieved"])
+
+    def test_phase8_edit_goal_put(self):
+        """PUT /api/goals/<goal_id> updates targets, target_type, and deadline."""
+        h1 = self.client.post('/api/habits', json={"name": "Goal Edit Test", "category": "Productivity"}).get_json()['id']
+        created = self.client.post('/api/goals', json={
+            "habit_id": h1,
+            "target_type": "weekly_completions",
+            "target_value": 3
+        }).get_json()
+
+        goal_id = created["id"]
+        future_date = (date.today() + timedelta(days=30)).isoformat()
+
+        # Update target value to 6 and add deadline
+        put_res = self.client.put(f'/api/goals/{goal_id}', json={
+            "target_value": 6,
+            "target_type": "weekly_completions",
+            "end_date": future_date
+        })
+        self.assertEqual(put_res.status_code, 200)
+        updated = put_res.get_json()
+        self.assertEqual(updated["target_value"], 6)
+        self.assertEqual(updated["end_date"], future_date)
+
+        # 404 for nonexistent goal
+        put_404 = self.client.put('/api/goals/99999', json={"target_value": 5})
+        self.assertEqual(put_404.status_code, 404)
+
+    # -----------------------------------------------------------------------
+    # 10. PHASE 8: PROGRESS REPORTS TESTS
+    # -----------------------------------------------------------------------
+    def test_phase8_progress_reports_daily_weekly_monthly(self):
+        """GET /api/reports accurately calculates daily, weekly, and monthly reports."""
+        today = date.today()
+        today_str = today.isoformat()
+        h1 = self.client.post('/api/habits', json={"name": "Report Habit 1", "category": "Coding"}).get_json()['id']
+        h2 = self.client.post('/api/habits', json={"name": "Report Habit 2", "category": "Fitness"}).get_json()['id']
+
+        # Add check-ins for the past 5 days
+        for i in range(5):
+            d_str = (today - timedelta(days=i)).isoformat()
+            self.client.post('/api/records', json={"habit_id": h1, "record_date": d_str, "status": "completed"})
+            self.client.post('/api/records', json={"habit_id": h2, "record_date": d_str, "status": "missed" if i % 2 == 0 else "completed"})
+
+        # Daily report
+        daily_res = self.client.get(f'/api/reports?type=daily&date={today_str}')
+        self.assertEqual(daily_res.status_code, 200)
+        daily = daily_res.get_json()
+        self.assertEqual(daily["report_type"], "daily")
+        self.assertEqual(daily["data_status"], "sufficient_data")
+        self.assertIn("summary", daily)
+        self.assertIn("habits", daily)
+        self.assertIn("generated_at", daily)
+
+        # Weekly report
+        weekly_res = self.client.get(f'/api/reports?type=weekly&date={today_str}')
+        self.assertEqual(weekly_res.status_code, 200)
+        weekly = weekly_res.get_json()
+        self.assertEqual(weekly["report_type"], "weekly")
+        self.assertEqual(weekly["data_status"], "sufficient_data")
+        self.assertEqual(len(weekly["habits"]), 2)
+        self.assertTrue(weekly["summary"]["completion_rate"] > 0)
+        self.assertIn("successful_habits", weekly)
+        self.assertIn("habits_needing_attention", weekly)
+
+        # Monthly report
+        monthly_res = self.client.get(f'/api/reports?type=monthly&date={today_str}')
+        self.assertEqual(monthly_res.status_code, 200)
+        monthly = monthly_res.get_json()
+        self.assertEqual(monthly["report_type"], "monthly")
+        self.assertEqual(monthly["data_status"], "sufficient_data")
+
+    def test_phase8_reports_empty_dataset(self):
+        """GET /api/reports handles empty datasets gracefully with no fabricated stats."""
+        res = self.client.get('/api/reports?type=weekly&date=2020-01-01')
+        self.assertEqual(res.status_code, 200)
+        data = res.get_json()
+        self.assertEqual(data["data_status"], "no_data")
+        self.assertEqual(data["summary"]["total_records"], 0)
+        self.assertEqual(data["summary"]["completed"], 0)
+        self.assertEqual(data["summary"]["completion_rate"], 0)
+        self.assertEqual(len(data["habits"]), 0)
+
+    def test_phase8_reports_validation(self):
+        """GET /api/reports validates report type and date format."""
+        # Invalid type
+        res1 = self.client.get('/api/reports?type=yearly')
+        self.assertEqual(res1.status_code, 400)
+
+        # Invalid date
+        res2 = self.client.get('/api/reports?type=weekly&date=invalid-date')
+        self.assertEqual(res2.status_code, 400)
+
+    # -----------------------------------------------------------------------
+    # 11. PHASE 8: CSV EXPORT TESTS
+    # -----------------------------------------------------------------------
+    def test_phase8_csv_export_habits(self):
+        """GET /api/export?type=habits returns valid CSV with UTF-8 BOM."""
+        self.client.post('/api/habits', json={"name": "Export Habit", "category": "Coding", "time_of_day": "Morning"})
+
+        res = self.client.get('/api/export?type=habits')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.headers.get('Content-Type'), 'text/csv; charset=utf-8')
+        self.assertIn('attachment; filename="streaklab_habits_', res.headers.get('Content-Disposition', ''))
+
+        # Check UTF-8 BOM
+        self.assertTrue(res.data.startswith(b'\xef\xbb\xbf'))
+        content = res.data.decode('utf-8-sig')
+        self.assertIn("Habit ID,Name,Description,Category,Time of Day,Target Time,Target Frequency,Current Streak,Best Streak,Reminder,Status,Created At", content)
+        self.assertIn("Export Habit", content)
+
+    def test_phase8_csv_export_records(self):
+        """GET /api/export?type=records exports check-in history."""
+        today = date.today().isoformat()
+        h1 = self.client.post('/api/habits', json={"name": "Records Habit", "category": "Fitness"}).get_json()['id']
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": today, "status": "completed"})
+
+        res = self.client.get('/api/export?type=records')
+        self.assertEqual(res.status_code, 200)
+        content = res.data.decode('utf-8-sig')
+        self.assertIn("Record ID,Habit ID,Habit Name,Category,Record Date,Status,Created At,Updated At", content)
+        self.assertIn("Records Habit", content)
+        self.assertIn("completed", content)
+
+    def test_phase8_csv_export_goals(self):
+        """GET /api/export?type=goals exports goals and milestones data."""
+        h1 = self.client.post('/api/habits', json={"name": "Goal Export Habit", "category": "Learning"}).get_json()['id']
+        self.client.post('/api/goals', json={"habit_id": h1, "target_type": "weekly_completions", "target_value": 5})
+
+        res = self.client.get('/api/export?type=goals')
+        self.assertEqual(res.status_code, 200)
+        content = res.data.decode('utf-8-sig')
+        self.assertIn("Goal ID,Habit ID,Habit Name,Category,Target Type,Target Value,Current Progress,Progress %,Status,Target Deadline,Milestone Type,Achieved Period", content)
+        self.assertIn("Goal Export Habit", content)
+
+    def test_phase8_csv_export_report(self):
+        """GET /api/export?type=report exports current progress report breakdown."""
+        today = date.today().isoformat()
+        h1 = self.client.post('/api/habits', json={"name": "Report Export Habit", "category": "Coding"}).get_json()['id']
+        self.client.post('/api/records', json={"habit_id": h1, "record_date": today, "status": "completed"})
+
+        res = self.client.get(f'/api/export?type=report&report_type=weekly&date={today}')
+        self.assertEqual(res.status_code, 200)
+        content = res.data.decode('utf-8-sig')
+        self.assertIn("Report Type,Start Date,End Date,Generated At,Habit ID,Habit Name,Category,Time of Day,Completed,Missed,Skipped,Completion Rate,Current Streak,Best Streak,Status", content)
+        self.assertIn("Report Export Habit", content)
+
+    def test_phase8_csv_formula_injection_sanitization(self):
+        """CSV export sanitizes formulas starting with '=', '+', '-', '@' to prevent spreadsheet injection."""
+        malicious_name = "=cmd|' /C calc'!A0"
+        self.client.post('/api/habits', json={"name": malicious_name, "category": "Security"})
+
+        res = self.client.get('/api/export?type=habits')
+        self.assertEqual(res.status_code, 200)
+        content = res.data.decode('utf-8-sig')
+
+        # The cell must have prepended single quote (') defusing the formula execution in Excel/Calc
+        self.assertIn("'=cmd|' /C calc'!A0", content)
+        self.assertNotIn("\n=cmd|' /C calc'!A0", content)
+
+    def test_phase8_csv_empty_tables(self):
+        """CSV export on empty tables returns headers gracefully without error."""
+        res_habits = self.client.get('/api/export?type=habits')
+        self.assertEqual(res_habits.status_code, 200)
+        self.assertIn("Habit ID,Name,Description,Category", res_habits.data.decode('utf-8-sig'))
+
+        res_records = self.client.get('/api/export?type=records')
+        self.assertEqual(res_records.status_code, 200)
+        self.assertIn("Record ID,Habit ID,Habit Name,Category", res_records.data.decode('utf-8-sig'))
+
+        res_goals = self.client.get('/api/export?type=goals')
+        self.assertEqual(res_goals.status_code, 200)
+        self.assertIn("Goal ID,Habit ID,Habit Name,Category", res_goals.data.decode('utf-8-sig'))
+
+    def test_phase8_csv_invalid_type(self):
+        """GET /api/export with invalid type returns 400 Bad Request."""
+        res = self.client.get('/api/export?type=unsupported_type')
+        self.assertEqual(res.status_code, 400)
+
+    # -----------------------------------------------------------------------
+    # 12. PHASE 8: AI COACH REMINDER & REPORT GROUNDING
+    # -----------------------------------------------------------------------
+    def test_phase8_coach_chatbox_reminders_and_reports(self):
+        """AI Habit Coach grounds responses in reminders and export queries."""
+        ai_explainer.reset_chat_rate_limits()
+        h1 = self.client.post('/api/habits', json={"name": "Night Reading", "category": "Learning"}).get_json()['id']
+        self.client.post('/api/reminders', json={"habit_id": h1, "reminder_time": "22:00", "enabled": True})
+
+        res_rem = self.client.post('/api/chat', json={"message": "Do I have any reminders set up?"})
+        self.assertEqual(res_rem.status_code, 200)
+        data = res_rem.get_json()
+        self.assertTrue(data.get("success"))
+        reply = data.get("reply", "")
+        self.assertIn("Night Reading", reply)
+        self.assertIn("22:00", reply)
+
+        res_rep = self.client.post('/api/chat', json={"message": "Can I export my habit data to CSV?"})
+        self.assertEqual(res_rep.status_code, 200)
+        rep_reply = res_rep.get_json().get("reply", "")
+        self.assertIn("CSV", rep_reply)
+
 
 if __name__ == '__main__':
     unittest.main()
+
 
 
 

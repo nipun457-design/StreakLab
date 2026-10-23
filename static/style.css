@@ -1,237 +1,320 @@
 /* ==========================================================================
-   StreakLab — Habit Pattern Detector
+   StreakLab — Habit Intelligence & Daily Routine Tracker
    Stylesheet: static/style.css
-   Designed for clean, modern, responsive aesthetics (Desktop & Mobile)
+   Modern, Clean, Production-Grade SaaS Aesthetic (Desktop & Mobile)
    ========================================================================== */
 
 /* --------------------------------------------------------------------------
    1. CSS VARIABLES (DESIGN SYSTEM TOKENS)
    -------------------------------------------------------------------------- */
 :root {
-  /* Brand Palette */
+  /* Brand Primary & Accents */
   --primary: #4f46e5;
   --primary-hover: #4338ca;
   --primary-subtle: #eef2ff;
-  --primary-gradient: linear-gradient(135deg, #4f46e5 0%, #7c3aed 50%, #a855f7 100%);
-  --brand-gradient: linear-gradient(135deg, #2563eb 0%, #4f46e5 50%, #9333ea 100%);
+  --primary-border: #c7d2fe;
+  --primary-ring: rgba(79, 70, 229, 0.25);
+  --brand-gradient: linear-gradient(135deg, #4f46e5 0%, #6366f1 50%, #818cf8 100%);
   
   /* Status Colors */
   --emerald: #10b981;
+  --emerald-hover: #059669;
   --emerald-subtle: #ecfdf5;
+  --emerald-border: #a7f3d0;
+  --emerald-text: #065f46;
+
   --orange: #f97316;
   --orange-subtle: #fff7ed;
+  --orange-border: #fed7aa;
+  --orange-text: #9a3412;
+
   --rose: #ef4444;
+  --rose-hover: #dc2626;
   --rose-subtle: #fef2f2;
+  --rose-border: #fecaca;
+  --rose-text: #991b1b;
+
   --amber: #f59e0b;
+  --amber-hover: #d97706;
   --amber-subtle: #fffbeb;
+  --amber-border: #fde68a;
+  --amber-text: #92400e;
+
   --purple: #8b5cf6;
   --purple-subtle: #f5f3ff;
+  --purple-border: #ddd6fe;
 
   /* Surfaces & Backgrounds */
   --bg-body: #f8fafc;
   --surface-card: #ffffff;
+  --surface-muted: #f1f5f9;
   --surface-border: #e2e8f0;
+  --surface-border-subtle: #f1f5f9;
   --text-main: #0f172a;
+  --text-body: #334155;
   --text-muted: #64748b;
+  --text-light: #94a3b8;
 
   /* Time of Day Themes */
   --morning-color: #f59e0b;
   --afternoon-color: #3b82f6;
   --evening-color: #8b5cf6;
 
-  /* Transitions & Radii */
-  --radius-card: 16px;
-  --transition-fast: all 0.2s ease-in-out;
-  --transition-smooth: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  --shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.05);
-  --shadow-md: 0 4px 12px -2px rgba(15, 23, 42, 0.08);
-  --shadow-hover: 0 10px 25px -4px rgba(79, 70, 229, 0.12);
+  /* Geometry & Transitions */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-pill: 9999px;
+
+  --transition-fast: all 0.15s ease-in-out;
+  --transition-smooth: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+
+  --shadow-xs: 0 1px 2px 0 rgba(15, 23, 42, 0.04);
+  --shadow-sm: 0 1px 3px 0 rgba(15, 23, 42, 0.06), 0 1px 2px -1px rgba(15, 23, 42, 0.04);
+  --shadow-md: 0 4px 6px -1px rgba(15, 23, 42, 0.07), 0 2px 4px -2px rgba(15, 23, 42, 0.04);
+  --shadow-lg: 0 10px 15px -3px rgba(15, 23, 42, 0.08), 0 4px 6px -4px rgba(15, 23, 42, 0.04);
+  --shadow-hover: 0 12px 24px -4px rgba(79, 70, 229, 0.12);
 }
 
 /* --------------------------------------------------------------------------
    2. GLOBAL RESETS & TYPOGRAPHY
    -------------------------------------------------------------------------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   background-color: var(--bg-body);
-  color: var(--text-main);
+  color: var(--text-body);
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
 }
 
-h1, h2, h3, h4, .brand-text {
+h1, h2, h3, h4, h5, h6, .brand-text {
   font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
+  color: var(--text-main);
+  font-weight: 700;
 }
+
+/* Accessibility Focus Ring */
+:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* Respect Reduced Motion Preferences */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Utility Font Sizes */
+.fs-xs { font-size: 0.8125rem !important; }
+.fs-xxs { font-size: 0.75rem !important; }
 
 /* --------------------------------------------------------------------------
-   3. NAVIGATION BAR
+   3. NAVIGATION BAR & DESTINATIONS
    -------------------------------------------------------------------------- */
 .bg-surface {
-  background-color: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  background-color: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border-bottom: 1px solid var(--surface-border) !important;
 }
 
 .brand-icon-wrapper {
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   border-radius: 10px;
   background: var(--brand-gradient);
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.3);
-  font-size: 1.25rem;
+  box-shadow: 0 4px 10px rgba(79, 70, 229, 0.25);
+  font-size: 1.15rem;
+  flex-shrink: 0;
 }
 
 .brand-text {
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   font-weight: 800;
   line-height: 1.1;
   color: var(--text-main);
 }
 
 .brand-text-accent {
-  background: var(--brand-gradient);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
+  color: var(--primary);
 }
 
 .brand-subtext {
-  font-size: 0.7rem;
+  font-size: 0.68rem;
   font-weight: 600;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
 
+/* Navigation Links */
+.navbar-nav .nav-link {
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  transition: var(--transition-fast);
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+}
+
+.navbar-nav .nav-link:hover {
+  color: var(--text-main);
+  background-color: var(--surface-muted);
+}
+
+.navbar-nav .nav-link.active {
+  color: var(--primary) !important;
+  background-color: var(--primary-subtle) !important;
+  font-weight: 600;
+}
+
 .date-chip {
-  background-color: #f1f5f9;
+  background-color: var(--surface-muted);
   padding: 6px 14px;
-  border-radius: 20px;
-  border: 1px solid #e2e8f0;
-  color: #334155;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--surface-border);
+  color: var(--text-body);
 }
 
 /* Custom Color Utility Classes */
-.bg-indigo-subtle { background-color: var(--primary-subtle); }
-.text-indigo { color: var(--primary); }
-.border-indigo-subtle { border-color: #c7d2fe; }
+.bg-indigo-subtle { background-color: var(--primary-subtle) !important; }
+.text-indigo { color: var(--primary) !important; }
+.border-indigo-subtle { border-color: var(--primary-border) !important; }
 
-.bg-orange-subtle { background-color: var(--orange-subtle); }
-.text-orange { color: var(--orange); }
+.bg-orange-subtle { background-color: var(--orange-subtle) !important; }
+.text-orange { color: var(--orange) !important; }
+.border-orange-subtle { border-color: var(--orange-border) !important; }
 
-.bg-emerald-subtle { background-color: var(--emerald-subtle); }
-.text-emerald { color: var(--emerald); }
+.bg-emerald-subtle { background-color: var(--emerald-subtle) !important; }
+.text-emerald { color: var(--emerald) !important; }
+.border-emerald-subtle { border-color: var(--emerald-border) !important; }
 
-.bg-purple-subtle { background-color: var(--purple-subtle); }
-.text-purple { color: var(--purple); }
-.border-purple-subtle { border-color: #ddd6fe; }
+.bg-purple-subtle { background-color: var(--purple-subtle) !important; }
+.text-purple { color: var(--purple) !important; }
+.border-purple-subtle { border-color: var(--purple-border) !important; }
 
 /* --------------------------------------------------------------------------
-   4. WELCOME BANNER & HERO PROGRESS
+   4. APP VIEW ARCHITECTURE
    -------------------------------------------------------------------------- */
-.welcome-banner {
-  background: var(--brand-gradient);
-  box-shadow: 0 10px 25px -5px rgba(79, 70, 229, 0.35);
+.app-view {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* --------------------------------------------------------------------------
+   5. WELCOME HERO & PROGRESS BAR
+   -------------------------------------------------------------------------- */
+.welcome-card {
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border) !important;
 }
 
 .welcome-title {
-  font-size: 1.75rem;
+  font-size: 1.65rem;
   letter-spacing: -0.03em;
 }
 
 .welcome-desc {
   font-size: 0.95rem;
-  max-width: 580px;
-  line-height: 1.5;
-}
-
-.backdrop-blur {
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-}
-
-.bg-white\/20 {
-  background-color: rgba(255, 255, 255, 0.18);
-  border: 1px solid rgba(255, 255, 255, 0.25);
+  max-width: 620px;
 }
 
 .banner-stat-box {
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.22);
-  backdrop-filter: blur(10px);
+  background: var(--surface-muted);
+  border: 1px solid var(--surface-border);
 }
 
 .banner-progress {
-  height: 10px;
-  border-radius: 10px;
-  background-color: rgba(255, 255, 255, 0.25);
+  height: 9px;
+  border-radius: var(--radius-pill);
+  background-color: var(--surface-border);
 }
 
 .banner-progress .progress-bar {
-  border-radius: 10px;
-  transition: width 0.5s ease-in-out;
+  border-radius: var(--radius-pill);
+  transition: width 0.4s ease-in-out;
 }
 
 /* --------------------------------------------------------------------------
-   5. SUMMARY KPI CARDS
+   6. SUMMARY KPI METRIC CARDS
    -------------------------------------------------------------------------- */
 .metric-card {
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-md);
   background: var(--surface-card);
-  transition: var(--transition-smooth);
   border: 1px solid var(--surface-border) !important;
+  transition: var(--transition-smooth);
 }
 
 .metric-card:hover {
-  transform: translateY(-3px);
-  box-shadow: var(--shadow-hover) !important;
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-md) !important;
 }
 
 .metric-label {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  color: var(--text-muted);
 }
 
 .metric-value {
-  font-size: 1.6rem;
+  font-size: 1.55rem;
   color: var(--text-main);
   letter-spacing: -0.03em;
 }
 
 .metric-icon-box {
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 42px;
+  height: 42px;
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1.25rem;
+  font-size: 1.2rem;
   flex-shrink: 0;
 }
 
 /* --------------------------------------------------------------------------
-   6. TODAY'S HABITS SECTION & CARDS
+   7. TODAY'S HABITS CHECKLIST & MANAGEMENT
    -------------------------------------------------------------------------- */
 .habits-section-card {
   border: 1px solid var(--surface-border) !important;
+  background: var(--surface-card);
 }
 
 /* Filter Buttons */
 .filter-pill-group .filter-btn {
-  border-radius: 20px;
-  padding: 5px 14px;
+  border-radius: var(--radius-pill);
+  padding: 4px 12px;
+  font-size: 0.8125rem;
   font-weight: 500;
-  border-color: #e2e8f0;
-  color: #475569;
+  border-color: var(--surface-border);
+  color: var(--text-muted);
+  transition: var(--transition-fast);
 }
 
 .filter-pill-group .filter-btn:hover {
-  background-color: #f1f5f9;
+  background-color: var(--surface-muted);
   color: var(--text-main);
 }
 
@@ -239,56 +322,69 @@ h1, h2, h3, h4, .brand-text {
   background-color: var(--primary) !important;
   border-color: var(--primary) !important;
   color: #ffffff !important;
+  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.2);
+}
+
+/* Status Legend Bar */
+.status-legend-bar {
+  border: 1px solid var(--surface-border);
+}
+
+.legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  display: inline-block;
 }
 
 /* Habit Card Item */
 .habit-card {
-  border: 1px solid #e2e8f0;
-  background: #ffffff;
-  border-radius: 14px;
+  border: 1px solid var(--surface-border);
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
   padding: 16px;
-  transition: var(--transition-smooth);
+  transition: var(--transition-fast);
   position: relative;
 }
 
 .habit-card:hover {
   border-color: #cbd5e1;
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+  transform: translateY(-1px);
 }
 
 /* Habit Card States */
 .habit-card.status-completed {
   border-color: #86efac;
-  background: #f0fdf4;
+  background-color: #f0fdf4;
 }
 
 .habit-card.status-completed .habit-name {
-  color: #166534;
+  color: var(--emerald-text);
 }
 
 .habit-card.status-missed {
   border-color: #fca5a5;
-  background: #fef2f2;
+  background-color: #fef2f2;
 }
 
 .habit-card.status-missed .habit-name {
-  color: #991b1b;
+  color: var(--rose-text);
 }
 
 .habit-card.status-skipped {
   border-color: #fde68a;
-  background: #fffbeb;
+  background-color: #fffbeb;
 }
 
 .habit-card.status-skipped .habit-name {
-  color: #92400e;
+  color: var(--amber-text);
 }
 
 /* Habit Category Icon Pill */
 .habit-cat-icon {
-  width: 40px;
-  height: 40px;
+  width: 38px;
+  height: 38px;
   border-radius: 10px;
   display: flex;
   align-items: center;
@@ -297,19 +393,30 @@ h1, h2, h3, h4, .brand-text {
   flex-shrink: 0;
 }
 
-/* Habit Name and Metadata */
+/* Habit Name and Long-text Wrapping */
 .habit-name {
-  font-size: 1rem;
-  font-weight: 700;
-  color: #1e293b;
+  font-size: 0.98rem;
+  font-weight: 600;
+  color: var(--text-main);
   margin-bottom: 2px;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  max-width: 380px;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+@media (max-width: 576px) {
+  .habit-name {
+    max-width: 200px;
+  }
 }
 
 .streak-badge {
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   font-weight: 600;
-  padding: 4px 9px;
-  border-radius: 12px;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -319,111 +426,93 @@ h1, h2, h3, h4, .brand-text {
 .action-btn-group {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
+  background-color: var(--surface-muted);
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--surface-border);
 }
 
 .btn-status {
-  width: 36px;
-  height: 36px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
+  border: none;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #e2e8f0;
-  background-color: #ffffff;
-  color: #64748b;
-  font-size: 0.95rem;
-  cursor: pointer;
+  font-size: 0.85rem;
+  color: var(--text-muted);
   transition: var(--transition-fast);
-  padding: 0;
+  cursor: pointer;
 }
 
 .btn-status:hover {
-  transform: scale(1.1);
+  background-color: #e2e8f0;
+  color: var(--text-main);
 }
 
-/* Completed Button */
 .btn-status-done:hover,
-.habit-card.status-completed .btn-status-done {
-  background-color: var(--emerald);
-  border-color: var(--emerald);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);
+.btn-status-done.active {
+  background-color: var(--emerald) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 4px rgba(16, 185, 129, 0.3);
 }
 
-/* Missed Button */
 .btn-status-missed:hover,
-.habit-card.status-missed .btn-status-missed {
-  background-color: var(--rose);
-  border-color: var(--rose);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(239, 68, 68, 0.35);
+.btn-status-missed.active {
+  background-color: var(--rose) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 4px rgba(239, 68, 68, 0.3);
 }
 
-/* Skipped Button */
 .btn-status-skipped:hover,
-.habit-card.status-skipped .btn-status-skipped {
-  background-color: var(--amber);
-  border-color: var(--amber);
-  color: #ffffff;
-  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35);
+.btn-status-skipped.active {
+  background-color: var(--amber) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 4px rgba(245, 158, 11, 0.3);
 }
 
-/* Habit Options dropdown / delete */
 .btn-delete-habit {
-  color: #94a3b8;
-  border: none;
   background: transparent;
-  padding: 4px 6px;
+  border: none;
+  color: var(--text-light);
+  padding: 4px;
   border-radius: 6px;
   transition: var(--transition-fast);
+  cursor: pointer;
+  font-size: 0.95rem;
 }
 
 .btn-delete-habit:hover {
   color: var(--rose);
-  background-color: #fee2e2;
+  background-color: var(--rose-subtle);
 }
 
-/* 7-Day Mini History Dots */
+/* 7-Day History Mini Indicator */
 .mini-history-dots {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
 }
 
 .history-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background-color: #e2e8f0;
-  display: inline-block;
-  transition: var(--transition-fast);
-}
-
-.history-dot.dot-done {
-  background-color: var(--emerald);
-}
-
-.history-dot.dot-missed {
-  background-color: var(--rose);
-}
-
-.history-dot.dot-skipped {
-  background-color: var(--amber);
-}
-
-/* Legend items */
-.legend-dot {
-  width: 9px;
-  height: 9px;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   display: inline-block;
 }
 
-/* Empty State Box */
-.empty-icon-circle {
-  width: 60px;
-  height: 60px;
+.dot-done { background-color: var(--emerald); }
+.dot-missed { background-color: var(--rose); }
+.dot-skipped { background-color: var(--amber); }
+.dot-pending { background-color: #cbd5e1; }
+
+/* Empty State */
+.empty-state .empty-icon-circle {
+  width: 64px;
+  height: 64px;
   border-radius: 50%;
   background-color: var(--primary-subtle);
   display: flex;
@@ -432,12 +521,8 @@ h1, h2, h3, h4, .brand-text {
 }
 
 /* --------------------------------------------------------------------------
-   7. RIGHT COLUMN CHARTS & AI PREVIEW
+   8. CHARTS & TIME DISTRIBUTION
    -------------------------------------------------------------------------- */
-.bg-morning { background-color: var(--morning-color); }
-.bg-afternoon { background-color: var(--afternoon-color); }
-.bg-evening { background-color: var(--evening-color); }
-
 .legend-color-box {
   width: 10px;
   height: 10px;
@@ -445,446 +530,30 @@ h1, h2, h3, h4, .brand-text {
   display: inline-block;
 }
 
-.ai-insight-card {
-  background: linear-gradient(135deg, #fdf4ff 0%, #f5f3ff 50%, #eff6ff 100%);
-  border: 1px solid #ddd6fe !important;
-}
-
-.ai-badge-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 8px;
-  background: var(--brand-gradient);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.insight-item {
-  transition: var(--transition-fast);
-}
-
-.insight-item:hover {
-  transform: translateX(3px);
-  box-shadow: var(--shadow-sm);
-}
+.bg-morning { background-color: var(--morning-color); }
+.bg-afternoon { background-color: var(--afternoon-color); }
+.bg-evening { background-color: var(--evening-color); }
 
 /* --------------------------------------------------------------------------
-   8. MODAL & FORMS
+   9. CALENDAR HEATMAP
    -------------------------------------------------------------------------- */
-.modal-header-icon {
-  width: 38px;
-  height: 38px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 1.1rem;
-}
-
-.form-control:focus,
-.form-select:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 0.25rem rgba(79, 70, 229, 0.15);
-}
-
-/* --------------------------------------------------------------------------
-   9. MOBILE & RESPONSIVE ADJUSTMENTS
-   -------------------------------------------------------------------------- */
-@media (max-width: 768px) {
-  .welcome-title {
-    font-size: 1.4rem;
-  }
-  
-  .metric-value {
-    font-size: 1.35rem;
-  }
-
-  .habit-card {
-    padding: 12px;
-  }
-
-  .action-btn-group {
-    justify-content: flex-end;
-  }
-
-  .filter-pill-group {
-    width: 100%;
-    display: flex;
-  }
-
-  .filter-pill-group .filter-btn {
-    flex: 1;
-    text-align: center;
-    padding: 6px 4px;
-    font-size: 0.8rem;
-  }
-}
-
-/* --------------------------------------------------------------------------
-   10. PHASE 6: FLOATING AI HABIT COACH CHATBOX
-   -------------------------------------------------------------------------- */
-.fs-xs {
-  font-size: 0.75rem !important;
-}
-
-.fs-xxs {
-  font-size: 0.68rem !important;
-}
-
-.chat-launcher-btn {
-  position: fixed;
-  bottom: 24px;
-  right: 24px;
-  z-index: 1080;
-  width: 58px;
-  height: 58px;
-  border-radius: 50%;
-  background: var(--brand-gradient);
-  border: none;
-  color: #ffffff;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.35), 0 2px 6px rgba(0, 0, 0, 0.1);
-  cursor: pointer;
-  transition: transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
-}
-
-.chat-launcher-btn:hover {
-  transform: scale(1.08);
-  box-shadow: 0 12px 28px rgba(79, 70, 229, 0.45);
-}
-
-.chat-launcher-btn:active {
-  transform: scale(0.94);
-}
-
-.chat-launcher-inner {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 100%;
-  height: 100%;
-}
-
-.chat-online-badge {
-  width: 12px;
-  height: 12px;
-  box-shadow: 0 0 0 2px #ffffff;
-}
-
-.chat-panel {
-  position: fixed;
-  bottom: 92px;
-  right: 24px;
-  z-index: 1080;
-  width: 390px;
-  max-width: calc(100vw - 32px);
-  height: 560px;
-  max-height: calc(100vh - 120px);
-  display: flex;
-  flex-direction: column;
-  border-radius: 18px;
-  overflow: hidden;
-  background: #ffffff;
-  box-shadow: 0 20px 45px -10px rgba(15, 23, 42, 0.22), 0 0 0 1px rgba(15, 23, 42, 0.08);
-  animation: chatSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes chatSlideUp {
-  from {
-    opacity: 0;
-    transform: translateY(16px) scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.chat-header {
-  background: var(--brand-gradient);
-  flex-shrink: 0;
-}
-
-.chat-avatar-wrapper {
-  width: 34px;
-  height: 34px;
-  border-radius: 9px;
-  background: rgba(255, 255, 255, 0.2);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #ffffff;
-}
-
-.chat-status-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #34d399;
-  display: inline-block;
-}
-
-.hover-white {
-  transition: color 0.15s ease;
-}
-
-.hover-white:hover {
-  color: #ffffff !important;
-}
-
-.chat-messages {
-  flex: 1 1 auto;
-  overflow-y: auto;
-  background: #f8fafc;
-  scroll-behavior: smooth;
-}
-
-.chat-msg {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 14px;
-}
-
-.chat-msg.coach {
-  flex-direction: row;
-  align-items: flex-start;
-}
-
-.chat-msg.user {
-  flex-direction: row-reverse;
-  align-items: flex-start;
-}
-
-.chat-msg-avatar {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  background: var(--primary-subtle);
-  color: var(--primary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.85rem;
-  flex-shrink: 0;
-  margin-top: 2px;
-}
-
-.chat-msg-content {
-  max-width: 84%;
-  display: flex;
-  flex-direction: column;
-}
-
-.chat-msg.user .chat-msg-content {
-  align-items: flex-end;
-}
-
-.chat-msg.coach .chat-msg-content {
-  align-items: flex-start;
-}
-
-.chat-bubble {
-  padding: 10px 14px;
-  border-radius: 14px;
-  font-size: 0.865rem;
-  line-height: 1.5;
-  word-break: break-word;
-}
-
-.chat-bubble.coach-bubble {
-  background: #ffffff;
-  color: var(--text-main);
-  border: 1px solid var(--surface-border);
-  border-top-left-radius: 4px;
-  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
-}
-
-.chat-bubble.user-bubble {
-  background: var(--primary);
-  color: #ffffff;
-  border-top-right-radius: 4px;
-  box-shadow: 0 2px 6px rgba(79, 70, 229, 0.25);
-}
-
-.chat-bubble-text strong {
-  font-weight: 600;
-}
-
-.chat-bubble-meta {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 6px;
-  font-size: 0.72rem;
-}
-
-.chat-evidence-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-top: 6px;
-}
-
-.chat-evidence-tags .badge {
-  font-size: 0.7rem;
-  font-weight: 500;
-  background: #f1f5f9;
-  color: #334155;
-  border: 1px solid #e2e8f0;
-}
-
-.chat-chips-container {
-  background: rgba(241, 245, 249, 0.7);
-  border: 1px dashed var(--surface-border);
-  border-radius: 12px;
-  padding: 8px;
-}
-
-.chat-chip-btn {
-  background: #ffffff;
-  border: 1px solid var(--surface-border);
-  border-radius: 20px;
-  padding: 4px 10px;
-  font-size: 0.76rem;
-  color: var(--primary);
-  font-weight: 500;
-  text-align: left;
-  transition: all 0.15s ease;
-  cursor: pointer;
-}
-
-.chat-chip-btn:hover {
-  background: var(--primary-subtle);
-  border-color: var(--primary);
-  transform: translateY(-1px);
-}
-
-.chat-typing {
-  background: #f8fafc;
-  border-top: 1px solid var(--surface-border);
-}
-
-.typing-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.typing-dots span {
-  width: 6px;
-  height: 6px;
-  background: var(--primary);
-  border-radius: 50%;
-  animation: typingBounce 1.2s infinite ease-in-out;
-}
-
-.typing-dots span:nth-child(2) {
-  animation-delay: 0.2s;
-}
-
-.typing-dots span:nth-child(3) {
-  animation-delay: 0.4s;
-}
-
-@keyframes typingBounce {
-  0%, 80%, 100% {
-    transform: scale(0);
-    opacity: 0.4;
-  }
-  40% {
-    transform: scale(1);
-    opacity: 1;
-  }
-}
-
-.chat-footer {
-  background: #ffffff !important;
-  border-top: 1px solid var(--surface-border);
-  flex-shrink: 0;
-}
-
-.chat-textarea {
-  resize: none;
-  border-radius: 10px;
-  font-size: 0.85rem;
-  max-height: 80px;
-  padding: 6px 10px;
-  border-color: var(--surface-border);
-}
-
-.chat-textarea:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.15);
-}
-
-.chat-send-btn {
-  width: 34px;
-  height: 34px;
-  flex-shrink: 0;
-  background: var(--primary);
-  border: none;
-}
-
-.chat-send-btn:hover {
-  background: var(--primary-hover);
-}
-
-.chat-send-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-@media (max-width: 576px) {
-  .chat-panel {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    width: 100vw;
-    height: 100vh;
-    max-width: 100vw;
-    max-height: 100vh;
-    border-radius: 0;
-    z-index: 1099;
-  }
-
-  .chat-launcher-btn {
-    bottom: 16px;
-    right: 16px;
-    width: 52px;
-    height: 52px;
-  }
-}
-
-/* ==========================================================================
-   PHASE 7: SMART PROGRESS & GOAL TRACKING STYLES
-   ========================================================================== */
-
-/* Calendar Heatmap Container & Grid */
 .calendar-wrapper {
-  background: #ffffff;
-  border-radius: 12px;
-  padding: 8px 0;
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
 }
 
 .calendar-grid-header {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
+  gap: 6px;
   text-align: center;
 }
 
 .calendar-weekday-title {
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-size: 0.75rem;
+  font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
   color: var(--text-muted);
   padding: 4px 0;
 }
@@ -892,170 +561,200 @@ h1, h2, h3, h4, .brand-text {
 .calendar-grid {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
-  gap: 8px;
+  gap: 6px;
 }
 
-/* Calendar Day Cell */
-.calendar-cell {
-  position: relative;
-  min-height: 48px;
+.calendar-day-cell {
   aspect-ratio: 1 / 1;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 4px;
-  font-size: 0.82rem;
+  font-size: 0.825rem;
   font-weight: 600;
-  border: 1px solid transparent;
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-  user-select: none;
   cursor: pointer;
+  transition: var(--transition-fast);
+  border: 1px solid transparent;
+  position: relative;
 }
 
-.calendar-cell:hover:not(.cell-future) {
-  transform: translateY(-2px) scale(1.04);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+.calendar-day-cell:hover {
+  transform: scale(1.05);
+  box-shadow: var(--shadow-sm);
   z-index: 2;
 }
 
-.calendar-cell:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 2px;
-  z-index: 3;
-}
-
-/* Cell Status Variants */
-.cell-completed {
-  background: #10b981;
-  color: #ffffff;
-  border-color: #059669;
-}
-
-.cell-partial {
-  background: #8b5cf6;
-  color: #ffffff;
-  border-color: #7c3aed;
-}
-
-.cell-missed {
-  background: #ef4444;
-  color: #ffffff;
-  border-color: #dc2626;
-}
-
-.cell-skipped {
-  background: #f59e0b;
-  color: #ffffff;
-  border-color: #d97706;
-}
-
-.cell-unrecorded {
-  background: #f8fafc;
-  color: #64748b;
-  border: 1px dashed #cbd5e1;
-}
-
-.cell-future {
-  background: #f8fafc;
-  color: #cbd5e1;
-  border: 1px solid #f1f5f9;
+.calendar-day-cell.other-month {
+  opacity: 0.25;
   cursor: default;
-  opacity: 0.6;
 }
 
-.cell-today {
-  box-shadow: 0 0 0 2px var(--primary), 0 2px 6px rgba(79, 70, 229, 0.3) !important;
-  font-weight: 800;
+.calendar-day-cell.is-today {
+  border: 2px solid var(--primary) !important;
 }
 
-.cell-day-num {
-  font-size: 0.85rem;
-  line-height: 1;
-}
+/* Heatmap Status Colors */
+.bg-heatmap-completed { background-color: #bbf7d0; color: #14532d; }
+.bg-heatmap-partial { background-color: #fef08a; color: #713f12; }
+.bg-heatmap-missed { background-color: #fecaca; color: #7f1d1d; }
+.bg-heatmap-skipped { background-color: #fed7aa; color: #7c2d12; }
+.bg-heatmap-unrecorded { background-color: #f1f5f9; color: #64748b; }
+.bg-heatmap-future { background-color: #f8fafc; color: #cbd5e1; border: 1px dashed #e2e8f0; }
 
-.cell-sub-indicator {
-  font-size: 0.62rem;
-  line-height: 1;
-  margin-top: 3px;
-  opacity: 0.9;
-}
-
-/* Heatmap Legend Markers */
 .legend-cell {
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
   display: inline-block;
 }
 
-.bg-heatmap-completed { background: #10b981; }
-.bg-heatmap-partial { background: #8b5cf6; }
-.bg-heatmap-missed { background: #ef4444; }
-.bg-heatmap-skipped { background: #f59e0b; }
-.bg-heatmap-unrecorded { background: #f1f5f9; border: 1px dashed #cbd5e1; }
-
-/* Weekly Progress Review Styles */
-.weekly-kpi-box {
-  background: linear-gradient(135deg, #f8fafc 0%, #eef2ff 100%);
-  border: 1px solid #e0e7ff;
-  border-radius: 12px;
-  padding: 16px;
+/* --------------------------------------------------------------------------
+   10. HABIT INSIGHTS (PATTERN DETECTION)
+   -------------------------------------------------------------------------- */
+.ai-insight-card {
+  border: 1px solid var(--surface-border) !important;
 }
 
-.day-badge-chip {
-  display: inline-flex;
+.ai-badge-icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--brand-gradient);
+  display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 4px 10px;
-  border-radius: 20px;
-  font-size: 0.75rem;
-  font-weight: 600;
-  background: #fff7ed;
-  color: #c2410c;
-  border: 1px solid #ffedd5;
+  justify-content: center;
+  font-size: 1rem;
 }
 
-.coach-review-box {
-  background: #faf5ff;
-  border: 1px solid #f3e8ff;
-  border-radius: 12px;
-  padding: 14px;
-}
-
-/* Goals & Milestones Styles */
-.goal-card {
-  background: #ffffff;
+.pattern-card {
+  border-radius: var(--radius-md);
+  padding: 14px 16px;
   border: 1px solid var(--surface-border);
-  border-radius: 12px;
-  padding: 14px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  background: #ffffff;
+  transition: var(--transition-fast);
+}
+
+.pattern-card:hover {
+  box-shadow: var(--shadow-sm);
+}
+
+.pattern-strong_routine {
+  border-left: 4px solid var(--emerald);
+  background-color: #f0fdf4;
+}
+
+.pattern-at_risk_habit,
+.pattern-repeated_misses {
+  border-left: 4px solid var(--rose);
+  background-color: #fef2f2;
+}
+
+.pattern-weekday_dropoff,
+.pattern-peak_performance_day {
+  border-left: 4px solid var(--primary);
+  background-color: #eef2ff;
+}
+
+.pattern-streak_milestone {
+  border-left: 4px solid var(--orange);
+  background-color: #fff7ed;
+}
+
+/* --------------------------------------------------------------------------
+   11. GOALS & MILESTONES
+   -------------------------------------------------------------------------- */
+.goal-card {
+  border: 1px solid var(--surface-border);
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  transition: var(--transition-fast);
 }
 
 .goal-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+  border-color: #cbd5e1;
+  box-shadow: var(--shadow-sm);
 }
 
-.goal-card.goal-achieved {
-  border-color: #a7f3d0;
-  background: linear-gradient(135deg, #ffffff 0%, #ecfdf5 100%);
+.badge-status-completed {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
 }
 
-.goal-progress-bar {
-  height: 8px;
-  border-radius: 4px;
-  transition: width 0.4s ease;
+.badge-status-overdue {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
 }
 
-.milestone-banner {
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  border: 1px solid #fcd34d;
-  color: #78350f;
-  border-radius: 12px;
-  padding: 12px 16px;
-  animation: slideDown 0.3s ease-out;
+.badge-status-active {
+  background: #eff6ff;
+  color: #1e40af;
+  border: 1px solid #bfdbfe;
+}
+
+.goal-card.goal-overdue {
+  border-color: #fca5a5;
+  background: #fef2f2;
+}
+
+.goal-card-edit-btn {
+  color: var(--text-light);
+  transition: var(--transition-fast);
+}
+
+.goal-card-edit-btn:hover {
+  color: var(--primary);
+}
+
+/* --------------------------------------------------------------------------
+   12. SMART REMINDERS & NOTIFICATION CHIPS
+   -------------------------------------------------------------------------- */
+.reminder-chip {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  transition: var(--transition-fast);
+  border: 1px solid transparent;
+}
+
+.reminder-chip.reminder-active {
+  background-color: #fef3c7;
+  color: #b45309;
+  border-color: #fde68a;
+}
+
+.reminder-chip.reminder-active:hover {
+  background-color: #fde68a;
+  transform: translateY(-1px);
+}
+
+.reminder-chip.reminder-none {
+  background-color: var(--surface-muted);
+  color: var(--text-muted);
+  border-color: var(--surface-border);
+}
+
+.reminder-chip.reminder-none:hover {
+  background-color: #e2e8f0;
+  color: var(--text-main);
+  transform: translateY(-1px);
+}
+
+.reminder-alert-banner {
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border: 1px solid #fde68a;
+  border-radius: var(--radius-md);
+  padding: 14px 18px;
+  box-shadow: var(--shadow-sm);
+  animation: slideDown 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 @keyframes slideDown {
@@ -1063,17 +762,290 @@ h1, h2, h3, h4, .brand-text {
   to { opacity: 1; transform: translateY(0); }
 }
 
-@media (max-width: 576px) {
-  .calendar-cell {
-    min-height: 40px;
-    font-size: 0.75rem;
-    padding: 2px;
-  }
-  .cell-day-num {
-    font-size: 0.75rem;
-  }
-  .cell-sub-indicator {
-    display: none;
-  }
+/* --------------------------------------------------------------------------
+   13. PROGRESS REPORTS
+   -------------------------------------------------------------------------- */
+.report-type-btn {
+  font-size: 0.78rem;
+  font-weight: 600;
+  transition: var(--transition-fast);
 }
 
+.report-type-btn.active {
+  background: var(--primary) !important;
+  color: #ffffff !important;
+  box-shadow: 0 2px 4px rgba(79, 70, 229, 0.25);
+}
+
+.report-kpi-card {
+  background: var(--surface-muted);
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+
+.report-highlight-success {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+.report-highlight-warning {
+  background: #fff1f2;
+  border: 1px solid #fecdd3;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+}
+
+.report-table-wrapper {
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--surface-border);
+}
+
+.report-table th {
+  font-size: 0.74rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  background-color: var(--surface-muted);
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--surface-border);
+}
+
+.report-table td {
+  font-size: 0.84rem;
+  vertical-align: middle;
+}
+
+/* --------------------------------------------------------------------------
+   14. CSV EXPORT CARDS (IN SETTINGS)
+   -------------------------------------------------------------------------- */
+.export-card {
+  transition: var(--transition-fast);
+  border-radius: var(--radius-md);
+}
+
+.export-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm) !important;
+  border-color: #cbd5e1 !important;
+}
+
+.export-icon-box {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   15. FLOATING AI COACH CHATBOX
+   -------------------------------------------------------------------------- */
+.chat-launcher-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: var(--brand-gradient);
+  border: none;
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(79, 70, 229, 0.35);
+  cursor: pointer;
+  z-index: 1050;
+  transition: var(--transition-fast);
+}
+
+.chat-launcher-btn:hover {
+  transform: scale(1.06);
+  box-shadow: 0 10px 28px rgba(79, 70, 229, 0.45);
+}
+
+.chat-online-badge {
+  width: 12px;
+  height: 12px;
+}
+
+.chat-panel {
+  position: fixed;
+  bottom: 92px;
+  right: 24px;
+  width: 380px;
+  max-width: calc(100vw - 32px);
+  height: 520px;
+  max-height: calc(100vh - 120px);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  z-index: 1050;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border) !important;
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.15) !important;
+}
+
+.chat-header {
+  background: var(--brand-gradient);
+}
+
+.chat-avatar-wrapper {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background-color: #86efac;
+  display: inline-block;
+}
+
+.chat-messages {
+  flex: 1;
+  background-color: #f8fafc;
+}
+
+.chat-msg {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.chat-msg.user {
+  flex-direction: row-reverse;
+}
+
+.chat-msg-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--primary-subtle);
+  color: var(--primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+
+.chat-msg.user .chat-msg-avatar {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.chat-bubble {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  max-width: 82%;
+}
+
+.coach-bubble {
+  background: #ffffff;
+  border: 1px solid var(--surface-border);
+  color: var(--text-main);
+  border-top-left-radius: 2px;
+}
+
+.user-bubble {
+  background: var(--primary);
+  color: #ffffff;
+  border-top-right-radius: 2px;
+}
+
+.chat-chip-btn {
+  background: #ffffff;
+  border: 1px solid var(--surface-border);
+  border-radius: var(--radius-pill);
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  color: var(--text-body);
+  transition: var(--transition-fast);
+  cursor: pointer;
+}
+
+.chat-chip-btn:hover {
+  background-color: var(--primary-subtle);
+  border-color: var(--primary-border);
+  color: var(--primary);
+}
+
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: var(--text-light);
+  display: inline-block;
+  animation: typingBounce 1.2s infinite ease-in-out;
+}
+
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.chat-textarea {
+  resize: none;
+  border-radius: 12px;
+  font-size: 0.85rem;
+}
+
+.chat-send-btn {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+}
+
+/* --------------------------------------------------------------------------
+   16. MODALS & FORMS
+   -------------------------------------------------------------------------- */
+.modal-header-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+}
+
+.form-control, .form-select {
+  border-radius: var(--radius-sm);
+  border-color: var(--surface-border);
+  font-size: 0.875rem;
+}
+
+.form-control:focus, .form-select:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+
+.btn-primary {
+  background-color: var(--primary);
+  border-color: var(--primary);
+}
+
+.btn-primary:hover, .btn-primary:focus {
+  background-color: var(--primary-hover);
+  border-color: var(--primary-hover);
+}

@@ -36,6 +36,14 @@ let currentWeeklyReviewData = null;
 let currentGoals = [];
 const acknowledgedMilestones = new Set();
 
+// Phase 8 Global State: Reminders, Goals, Reports & Export
+let currentReportType = "weekly";
+let currentReportDate = "";
+let currentReportData = null;
+let configuredReminders = [];
+const notifiedRemindersToday = new Set();
+let reminderTickerInterval = null;
+
 // Category visual styling configuration
 const CATEGORY_CONFIG = {
   "Coding": { icon: "bi-code-slash", color: "bg-indigo-subtle text-indigo" },
@@ -54,23 +62,29 @@ document.addEventListener("DOMContentLoaded", () => {
   // Step A: Display formatted local date in top navigation
   displayCurrentDate();
 
-  // Step B: Set up user event listeners (form submissions, filter tabs, period selector)
+  // Step B: Initialize single-page view router (Dashboard, Habits, Calendar, Goals, Reports, Settings)
+  initViewRouter();
+
+  // Step C: Set up user event listeners (form submissions, filter tabs, period selector)
   setupEventListeners();
 
-  // Step C: Initialize Chart.js interactive graphs with empty/initial state
+  // Step D: Initialize Chart.js interactive graphs with empty/initial state
   initCharts();
 
-  // Step D: Load habits from the SQLite database via Flask REST API
+  // Step E: Load habits from the SQLite database via Flask REST API
   loadHabitsFromApi();
 
-  // Step E: Load rule-based habit pattern insights (Phase 3)
+  // Step F: Load rule-based habit pattern insights
   loadInsightsFromApi(currentInsightsDays);
 
-  // Step F: Initialize AI Habit Coach Chatbox (Phase 6)
+  // Step G: Initialize AI Habit Coach Chatbox
   initChatCoach();
 
-  // Step G: Initialize Smart Progress & Goals (Phase 7)
+  // Step H: Initialize Smart Progress & Goals
   initPhase7();
+
+  // Step I: Initialize Smart Reminders, Reports & Export
+  initPhase8();
 });
 
 /**
@@ -93,6 +107,122 @@ function displayCurrentDate() {
   const now = new Date();
   const options = { weekday: "short", month: "short", day: "numeric", year: "numeric" };
   dateEl.textContent = now.toLocaleDateString("en-US", options);
+}
+
+// ----------------------------------------------------------------------------
+// VIEW ROUTING & NAVIGATION
+// ----------------------------------------------------------------------------
+const VALID_VIEWS = ["dashboard", "habits", "calendar", "goals", "reports", "settings"];
+
+/**
+ * Initializes single-page application navigation router and binds history/hash changes.
+ */
+function initViewRouter() {
+  // 1. Listen for clicks on any element with data-view
+  document.addEventListener("click", (e) => {
+    const trigger = e.target.closest("[data-view]");
+    if (trigger) {
+      const viewName = trigger.getAttribute("data-view");
+      if (viewName && VALID_VIEWS.includes(viewName)) {
+        e.preventDefault();
+        switchView(viewName);
+      }
+    }
+  });
+
+  // 2. Listen for URL hash changes (e.g. back/forward buttons or direct hash links)
+  window.addEventListener("hashchange", () => {
+    const hash = window.location.hash ? window.location.hash.substring(1) : "dashboard";
+    switchView(hash, false);
+  });
+
+  // 3. Connect top navbar AI Coach button
+  const navAiCoachBtn = document.getElementById("navAiCoachBtn");
+  if (navAiCoachBtn) {
+    navAiCoachBtn.addEventListener("click", () => {
+      openChatPanel();
+    });
+  }
+
+  // 4. Determine initial view from URL hash on boot
+  const initialHash = window.location.hash ? window.location.hash.substring(1) : "dashboard";
+  switchView(initialHash, false);
+}
+
+/**
+ * Switches the active view, synchronizes navigation states, and triggers view lifecycle hooks.
+ */
+function switchView(viewName, updateHash = true) {
+  if (!VALID_VIEWS.includes(viewName)) {
+    viewName = "dashboard";
+  }
+
+  // Hide all view containers and reveal active view
+  VALID_VIEWS.forEach(v => {
+    const container = document.getElementById(`view-${v}`);
+    if (container) {
+      if (v === viewName) {
+        container.classList.remove("d-none");
+      } else {
+        container.classList.add("d-none");
+      }
+    }
+  });
+
+  // Update navigation link active states
+  document.querySelectorAll(".nav-link[data-view]").forEach(link => {
+    const linkView = link.getAttribute("data-view");
+    if (linkView === viewName) {
+      link.classList.add("active");
+      link.setAttribute("aria-current", "page");
+    } else {
+      link.classList.remove("active");
+      link.removeAttribute("aria-current");
+    }
+  });
+
+  // Close mobile navbar collapse if open
+  const mainNavbarNav = document.getElementById("mainNavbarNav");
+  if (mainNavbarNav && mainNavbarNav.classList.contains("show") && window.bootstrap) {
+    const collapseInst = bootstrap.Collapse.getInstance(mainNavbarNav) || new bootstrap.Collapse(mainNavbarNav, { toggle: false });
+    collapseInst.hide();
+  }
+
+  // Synchronize browser URL hash if requested
+  if (updateHash && window.location.hash !== `#${viewName}`) {
+    window.location.hash = `#${viewName}`;
+  }
+
+  // Scroll to top of page
+  window.scrollTo({ top: 0, behavior: "instant" });
+
+  // View-specific data & rendering triggers
+  if (viewName === "dashboard") {
+    if (weeklyChartInstance && typeof weeklyChartInstance.resize === "function") {
+      weeklyChartInstance.resize();
+    }
+    if (timeOfDayChartInstance && typeof timeOfDayChartInstance.resize === "function") {
+      timeOfDayChartInstance.resize();
+    }
+  } else if (viewName === "habits") {
+    renderHabits();
+  } else if (viewName === "calendar") {
+    if (!currentCalendarData) {
+      loadCalendarHeatmap();
+    }
+    if (!currentWeeklyReviewData) {
+      loadWeeklyReview();
+    }
+  } else if (viewName === "goals") {
+    if (!currentGoals || currentGoals.length === 0) {
+      loadGoalsAndMilestones();
+    }
+  } else if (viewName === "reports") {
+    loadProgressReport(currentReportType, currentReportDate);
+  } else if (viewName === "settings") {
+    loadRemindersList();
+    checkNotificationPermissionState();
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -135,6 +265,9 @@ async function loadHabitsFromApi() {
     loadCalendarHeatmap();
     loadWeeklyReview();
     loadGoalsAndMilestones();
+    loadRemindersList();
+    loadProgressReport(currentReportType, currentReportDate);
+    checkRemindersTick();
 
   } catch (error) {
     console.error("StreakLab: Could not load habits from API:", error);
@@ -189,7 +322,7 @@ function checkLocalStorageMigration() {
           <div class="d-flex align-items-center gap-2">
             <i class="bi bi-cloud-arrow-up-fill text-primary fs-4"></i>
             <div>
-              <strong class="text-dark">Phase 1 Habits Detected</strong>
+              <strong class="text-dark">Saved Browser Habits Detected</strong>
               <div class="small text-muted">Found ${legacy.length} habits in your browser storage. Would you like to import them into your SQLite database?</div>
             </div>
           </div>
@@ -244,7 +377,7 @@ async function migrateLegacyHabits() {
           target_frequency: item.frequency || "daily",
           time_of_day: item.timeOfDay || "Morning",
           target_time: item.targetTime || "08:00 AM",
-          description: "Imported from Phase 1 browser storage"
+          description: "Imported from previous browser storage"
         })
       });
 
@@ -356,6 +489,23 @@ function renderHabits() {
     const isBusy = activeRecordRequests.has(habit.id) || activeDeleteRequests.has(habit.id);
     const disabledAttr = isBusy ? "disabled" : "";
 
+    // Phase 8 Reminder Chip
+    const rem = habit.reminder;
+    let reminderChipHtml = "";
+    if (rem && rem.enabled) {
+      reminderChipHtml = `
+        <span class="reminder-chip reminder-active" role="button" tabindex="0" onclick="openReminderModal(${habit.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openReminderModal(${habit.id});}" title="Daily reminder at ${escapeHtml(rem.reminder_time)}. Click to edit.">
+          <i class="bi bi-bell-fill"></i> ${escapeHtml(rem.reminder_time)}
+        </span>
+      `;
+    } else {
+      reminderChipHtml = `
+        <span class="reminder-chip reminder-none" role="button" tabindex="0" onclick="openReminderModal(${habit.id})" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openReminderModal(${habit.id});}" title="Click to set daily reminder">
+          <i class="bi bi-bell"></i> Set Reminder
+        </span>
+      `;
+    }
+
     return `
       <div class="habit-card ${statusClass}" data-id="${habit.id}">
         <div class="d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3">
@@ -367,8 +517,9 @@ function renderHabits() {
             </div>
             <div>
               <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
-                <span class="habit-name">${escapeHtml(habit.name)}</span>
+                <span class="habit-name" title="${escapeHtml(habit.name)}">${escapeHtml(habit.name)}</span>
                 <span class="badge ${statusBadgeClass} rounded-pill small">${statusLabel}</span>
+                ${reminderChipHtml}
               </div>
               <div class="d-flex align-items-center gap-3 text-muted small flex-wrap">
                 <span><i class="bi bi-clock me-1"></i>${escapeHtml(targetTime)}</span>
@@ -445,6 +596,96 @@ function renderHabits() {
       </div>
     `;
   }).join("");
+
+  // Also render into My Habits catalog container if present
+  renderHabitsManagementList(filtered);
+}
+
+/**
+ * Renders the active habit catalog into #habitsManagementContainer on the My Habits view.
+ */
+function renderHabitsManagementList(filteredList) {
+  const mgmtContainer = document.getElementById("habitsManagementContainer");
+  if (!mgmtContainer) return;
+
+  if (filteredList.length === 0) {
+    mgmtContainer.innerHTML = `
+      <div class="text-center py-5 text-muted">
+        <i class="bi bi-inbox fs-2 d-block mb-2 text-muted"></i>
+        <p class="fw-semibold mb-1">No habits match this filter.</p>
+        <p class="small mb-3">Add a new habit to start building your routine.</p>
+        <button type="button" class="btn btn-sm btn-primary rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#addHabitModal">
+          <i class="bi bi-plus-lg me-1"></i>Add Habit
+        </button>
+      </div>
+    `;
+    return;
+  }
+
+  mgmtContainer.innerHTML = filteredList.map(habit => {
+    const catName = habit.category || "General";
+    const catConfig = CATEGORY_CONFIG[catName] || CATEGORY_CONFIG["General"];
+    const timeOfDay = habit.timeOfDay || habit.time_of_day || "Morning";
+    const targetTime = habit.targetTime || habit.target_time || "08:00 AM";
+    const frequency = habit.frequency || habit.target_frequency || "daily";
+    const streakCount = typeof habit.streak === "number" ? habit.streak : 0;
+    const rem = habit.reminder;
+    const isBusy = activeRecordRequests.has(habit.id) || activeDeleteRequests.has(habit.id);
+    const disabledAttr = isBusy ? "disabled" : "";
+
+    return `
+      <div class="habit-mgmt-card p-3 rounded-4 border bg-white shadow-sm d-flex flex-column flex-md-row align-items-md-center justify-content-between gap-3" data-id="${habit.id}">
+        <div class="d-flex align-items-center gap-3">
+          <div class="habit-cat-icon ${catConfig.color}">
+            <i class="bi ${catConfig.icon}"></i>
+          </div>
+          <div>
+            <div class="d-flex align-items-center gap-2 flex-wrap mb-1">
+              <span class="habit-name fw-bold text-dark fs-6" title="${escapeHtml(habit.name)}">${escapeHtml(habit.name)}</span>
+              <span class="badge ${catConfig.color} rounded-pill small">${escapeHtml(catName)}</span>
+              ${rem && rem.enabled 
+                ? `<span class="badge bg-warning-subtle text-warning-emphasis rounded-pill small"><i class="bi bi-bell-fill me-1"></i>${escapeHtml(rem.reminder_time)}</span>` 
+                : `<span class="badge bg-secondary-subtle text-secondary rounded-pill small"><i class="bi bi-bell me-1"></i>No reminder</span>`}
+            </div>
+            <div class="d-flex align-items-center gap-3 text-muted small flex-wrap">
+              <span><i class="bi bi-clock me-1"></i>${escapeHtml(targetTime)}</span>
+              <span><i class="bi bi-sun me-1"></i>${escapeHtml(timeOfDay)}</span>
+              <span><i class="bi bi-repeat me-1"></i>${escapeHtml(frequency)}</span>
+              <span class="text-orange fw-semibold"><i class="bi bi-fire me-1"></i>${streakCount} day streak</span>
+            </div>
+            ${habit.description ? `<p class="text-muted small mb-0 mt-1">${escapeHtml(habit.description)}</p>` : ""}
+          </div>
+        </div>
+
+        <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+          <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 py-1" onclick="openReminderModal(${habit.id})" title="Configure Reminder">
+            <i class="bi bi-bell me-1"></i>Reminder
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1" onclick="openSetGoalForHabit(${habit.id})" title="Set Goal">
+            <i class="bi bi-bullseye me-1"></i>Goal
+          </button>
+          <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3 py-1" onclick="deleteHabit(${habit.id})" ${disabledAttr} title="Deactivate Habit">
+            <i class="bi bi-trash3 me-1"></i>Deactivate
+          </button>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+/**
+ * Pre-selects a habit and opens the goal creation modal.
+ */
+function openSetGoalForHabit(habitId) {
+  const goalModalEl = document.getElementById("setGoalModal");
+  const goalHabitSelect = document.getElementById("goalHabitSelect");
+  if (goalHabitSelect) {
+    goalHabitSelect.value = String(habitId);
+  }
+  if (goalModalEl && window.bootstrap) {
+    const modalInst = bootstrap.Modal.getInstance(goalModalEl) || new bootstrap.Modal(goalModalEl);
+    modalInst.show();
+  }
 }
 
 // ----------------------------------------------------------------------------
@@ -685,9 +926,15 @@ function setupEventListeners() {
   const filterButtons = document.querySelectorAll(".filter-btn");
   filterButtons.forEach(btn => {
     btn.addEventListener("click", () => {
-      filterButtons.forEach(b => b.classList.remove("active"));
-      btn.classList.add("active");
-      currentFilter = btn.getAttribute("data-filter") || "all";
+      const selectedFilter = btn.getAttribute("data-filter") || "all";
+      currentFilter = selectedFilter;
+      filterButtons.forEach(b => {
+        if ((b.getAttribute("data-filter") || "all") === selectedFilter) {
+          b.classList.add("active");
+        } else {
+          b.classList.remove("active");
+        }
+      });
       renderHabits();
     });
   });
@@ -1278,6 +1525,27 @@ function initChatCoach() {
 }
 
 /**
+ * Opens and focuses the floating AI Coach chat panel.
+ */
+function openChatPanel() {
+  const panel = document.getElementById("chatPanel");
+  const launcher = document.getElementById("chatLauncherBtn");
+  const openIcon = launcher ? launcher.querySelector(".chat-icon-open") : null;
+  const closeIcon = launcher ? launcher.querySelector(".chat-icon-close") : null;
+  const chatInput = document.getElementById("chatInput");
+
+  if (!panel) return;
+  isChatOpen = true;
+  panel.classList.remove("d-none");
+  if (openIcon) openIcon.classList.add("d-none");
+  if (closeIcon) closeIcon.classList.remove("d-none");
+  scrollChatToBottom();
+  setTimeout(() => {
+    if (chatInput) chatInput.focus();
+  }, 150);
+}
+
+/**
  * Opens or closes the floating chat panel.
  */
 function toggleChatPanel() {
@@ -1687,6 +1955,36 @@ function setupPhase7EventListeners() {
     });
   }
 
+  // Target type switcher (Phase 8: weekly_completions, target_streak, total_completions)
+  const targetTypeSelect = document.getElementById("goalTargetTypeSelect");
+  const weeklySliderContainer = document.getElementById("goalWeeklySliderContainer");
+  const numberInputContainer = document.getElementById("goalNumberInputContainer");
+  const numberInputLabel = document.getElementById("goalNumberInputLabel");
+  const numberInputHelp = document.getElementById("goalNumberInputHelp");
+  const numberInput = document.getElementById("goalTargetValueNumber");
+
+  if (targetTypeSelect) {
+    targetTypeSelect.addEventListener("change", (e) => {
+      const val = e.target.value;
+      if (val === "weekly_completions") {
+        if (weeklySliderContainer) weeklySliderContainer.classList.remove("d-none");
+        if (numberInputContainer) numberInputContainer.classList.add("d-none");
+      } else if (val === "target_streak") {
+        if (weeklySliderContainer) weeklySliderContainer.classList.add("d-none");
+        if (numberInputContainer) numberInputContainer.classList.remove("d-none");
+        if (numberInputLabel) numberInputLabel.innerHTML = `Target Streak (Days) <span class="text-danger">*</span>`;
+        if (numberInputHelp) numberInputHelp.textContent = "Number of consecutive days to maintain this habit (e.g. 7, 14, 30 days).";
+        if (numberInput && (!numberInput.value || numberInput.value === "5")) numberInput.value = "14";
+      } else if (val === "total_completions") {
+        if (weeklySliderContainer) weeklySliderContainer.classList.add("d-none");
+        if (numberInputContainer) numberInputContainer.classList.remove("d-none");
+        if (numberInputLabel) numberInputLabel.innerHTML = `Total Check-in Target <span class="text-danger">*</span>`;
+        if (numberInputHelp) numberInputHelp.textContent = "Complete this habit a total cumulative number of times (e.g. 20, 50, 100).";
+        if (numberInput && (!numberInput.value || numberInput.value === "5")) numberInput.value = "20";
+      }
+    });
+  }
+
   // Populate habits when Set Goal modal opens
   const setGoalModal = document.getElementById("setGoalModal");
   if (setGoalModal) {
@@ -1695,22 +1993,60 @@ function setupPhase7EventListeners() {
     });
   }
 
-  // Set goal form submission
+  // Reset Goal Modal when "Set Goal" button is clicked
+  const btnOpenSetGoal = document.getElementById("btnOpenSetGoal");
+  if (btnOpenSetGoal) {
+    btnOpenSetGoal.addEventListener("click", () => {
+      openCreateGoalModal();
+    });
+  }
+
+  // Set / Edit goal form submission
   const setGoalForm = document.getElementById("setGoalForm");
   if (setGoalForm) {
     setGoalForm.addEventListener("submit", async (e) => {
       e.preventDefault();
 
+      const goalIdInput = document.getElementById("goalIdInput");
+      const goalId = goalIdInput && goalIdInput.value ? parseInt(goalIdInput.value, 10) : null;
+
       const habitSelect = document.getElementById("goalHabitSelect");
-      const rangeVal = rangeInput ? parseInt(rangeInput.value, 10) : 5;
+      const typeSelect = document.getElementById("goalTargetTypeSelect");
+      const targetType = typeSelect ? typeSelect.value : "weekly_completions";
+      const endDateInput = document.getElementById("goalEndDateInput");
       const submitBtn = document.getElementById("btnSaveGoal");
 
       const habitId = habitSelect ? parseInt(habitSelect.value, 10) : null;
-      if (!habitId) {
+      if (!habitId && !goalId) {
         if (habitSelect) habitSelect.classList.add("is-invalid");
         return;
       }
       if (habitSelect) habitSelect.classList.remove("is-invalid");
+
+      let targetVal = 5;
+      if (targetType === "weekly_completions") {
+        targetVal = rangeInput ? parseInt(rangeInput.value, 10) : 5;
+      } else {
+        targetVal = numberInput ? parseInt(numberInput.value, 10) : 14;
+        if (!targetVal || targetVal < 1) {
+          showToast("Please enter a valid target value (minimum 1).", "warning");
+          return;
+        }
+      }
+
+      const endDateVal = endDateInput && endDateInput.value ? endDateInput.value.trim() : null;
+
+      const payload = {
+        target_type: targetType,
+        target_value: targetVal,
+        end_date: endDateVal
+      };
+      if (habitId) {
+        payload.habit_id = habitId;
+      }
+
+      const method = goalId ? "PUT" : "POST";
+      const endpoint = goalId ? `/api/goals/${goalId}` : "/api/goals";
 
       if (submitBtn) {
         submitBtn.disabled = true;
@@ -1718,10 +2054,10 @@ function setupPhase7EventListeners() {
       }
 
       try {
-        const res = await fetch("/api/goals", {
-          method: "POST",
+        const res = await fetch(endpoint, {
+          method: method,
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ habit_id: habitId, target_value: rangeVal })
+          body: JSON.stringify(payload)
         });
 
         if (!res.ok) {
@@ -1730,7 +2066,8 @@ function setupPhase7EventListeners() {
         }
 
         const saved = await res.json();
-        showToast(`Target set: ${saved.target_value} days/week for "${saved.habit_name}"! 🎯`, "success");
+        const actionWord = goalId ? "updated" : "set";
+        showToast(`Target ${actionWord} for "${saved.habit_name}"! 🎯`, "success");
 
         // Close modal
         if (typeof bootstrap !== "undefined" && bootstrap.Modal) {
@@ -1739,13 +2076,14 @@ function setupPhase7EventListeners() {
         }
 
         loadGoalsAndMilestones();
+        loadProgressReport(currentReportType, currentReportDate);
       } catch (err) {
         console.error("Failed to save goal:", err);
         showToast(`Could not save goal: ${err.message}`, "danger");
       } finally {
         if (submitBtn) {
           submitBtn.disabled = false;
-          submitBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save Target`;
+          submitBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save Goal`;
         }
       }
     });
@@ -2232,7 +2570,7 @@ async function loadGoalsAndMilestones(targetDateStr = null) {
 }
 
 /**
- * Renders weekly goals list with progress bars.
+ * Renders weekly goals list with progress bars, statuses, and edit actions.
  */
 function renderGoals(goals) {
   const container = document.getElementById("goalsListContainer");
@@ -2244,9 +2582,9 @@ function renderGoals(goals) {
         <div class="empty-icon-circle mx-auto mb-2" style="width: 44px; height: 44px; border-radius: 50%; background: #fff7ed; display: flex; align-items: center; justify-content: center;">
           <i class="bi bi-bullseye text-orange fs-4"></i>
         </div>
-        <h6 class="fw-bold mb-1 text-dark">No Weekly Targets Defined</h6>
-        <p class="text-muted small mb-3">Set weekly target days (e.g. 5 days/week) to track milestone progress.</p>
-        <button class="btn btn-sm btn-outline-primary rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#setGoalModal">
+        <h6 class="fw-bold mb-1 text-dark">No Habit Targets Defined</h6>
+        <p class="text-muted small mb-3">Set weekly target days, streak milestones, or total completion targets.</p>
+        <button class="btn btn-sm btn-outline-primary rounded-pill px-3" data-bs-toggle="modal" data-bs-target="#setGoalModal" onclick="openCreateGoalModal()">
           <i class="bi bi-plus-lg me-1"></i>Set a Goal
         </button>
       </div>
@@ -2255,40 +2593,74 @@ function renderGoals(goals) {
   }
 
   container.innerHTML = goals.map(g => {
-    const isAchieved = g.is_achieved;
-    const progressPct = g.progress_percentage || 0;
-    const barColor = isAchieved ? "bg-success" : "bg-primary";
-    const achievedClass = isAchieved ? "goal-achieved" : "";
-
+    const isAchieved = Boolean(g.is_achieved || g.status === "completed");
+    const isOverdue = g.status === "overdue";
+    const progressPct = typeof g.progress_percentage === "number" ? g.progress_percentage : 0;
+    
+    let barColor = "bg-primary";
     let statusBadge = "";
+    let cardClass = "";
+
     if (isAchieved) {
-      statusBadge = `<span class="badge bg-success text-white rounded-pill small"><i class="bi bi-trophy-fill me-1"></i>Target Hit! 🎉</span>`;
+      barColor = "bg-success";
+      cardClass = "goal-achieved";
+      statusBadge = `<span class="badge badge-status-completed rounded-pill small"><i class="bi bi-trophy-fill me-1"></i>Achieved! 🎉</span>`;
+    } else if (isOverdue) {
+      barColor = "bg-danger";
+      cardClass = "goal-overdue";
+      statusBadge = `<span class="badge badge-status-overdue rounded-pill small"><i class="bi bi-clock-history me-1"></i>Overdue</span>`;
     } else {
-      statusBadge = `<span class="badge bg-light text-muted border rounded-pill small">${g.remaining} more day${g.remaining === 1 ? '' : 's'} needed</span>`;
+      barColor = "bg-primary";
+      statusBadge = `<span class="badge badge-status-active rounded-pill small"><i class="bi bi-activity me-1"></i>Active</span>`;
     }
 
+    // Dynamic target explanation according to target_type
+    const targetType = g.target_type || "weekly_completions";
+    let targetLabel = "";
+    let progressLabel = "";
+
+    if (targetType === "target_streak") {
+      targetLabel = `Target Streak: <strong>${g.target_value} days</strong>`;
+      progressLabel = `Current streak: ${g.current_streak || 0} of ${g.target_value} days`;
+    } else if (targetType === "total_completions") {
+      targetLabel = `Target: <strong>${g.target_value} total check-ins</strong>`;
+      progressLabel = `${g.total_completions || 0} of ${g.target_value} completed`;
+    } else {
+      // Default: weekly completions
+      targetLabel = `Target: <strong>${g.target_value} days/week</strong>`;
+      progressLabel = `${g.completed_this_week || 0} of ${g.target_value} this week`;
+    }
+
+    const deadlineHtml = g.end_date
+      ? `<span class="badge bg-light text-muted border rounded-pill fs-xxs"><i class="bi bi-calendar-event me-1"></i>Due ${escapeHtml(g.end_date)}</span>`
+      : "";
+
     return `
-      <div class="goal-card ${achievedClass}">
+      <div class="goal-card ${cardClass}" data-goal-id="${g.id}">
         <div class="d-flex justify-content-between align-items-start mb-2">
           <div>
-            <div class="d-flex align-items-center gap-2 mb-1">
+            <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
               <strong class="text-dark small">${escapeHtml(g.habit_name)}</strong>
               <span class="badge bg-primary-subtle text-primary rounded-pill fs-xxs">${escapeHtml(g.category || "General")}</span>
+              ${deadlineHtml}
             </div>
-            <span class="text-muted small">Target: <strong>${g.target_value} days/week</strong></span>
+            <span class="text-muted small">${targetLabel}</span>
           </div>
           <div class="d-flex align-items-center gap-2">
             ${statusBadge}
-            <button type="button" class="btn btn-sm btn-link text-muted p-0" title="Remove Goal" onclick="deleteGoal(${g.id})">
+            <button type="button" class="btn btn-sm btn-link goal-card-edit-btn p-0" title="Edit Goal" onclick="openEditGoalModal(${g.id})" aria-label="Edit Goal">
+              <i class="bi bi-pencil-square"></i>
+            </button>
+            <button type="button" class="btn btn-sm btn-link text-muted p-0" title="Remove Goal" onclick="deleteGoal(${g.id})" aria-label="Remove Goal">
               <i class="bi bi-x-circle"></i>
             </button>
           </div>
         </div>
 
-        <!-- Progress Bar -->
+        <!-- Progress Bar & Percentage -->
         <div class="d-flex justify-content-between align-items-center mb-1 small">
-          <span class="text-muted">${g.completed_this_week} of ${g.target_value} completed</span>
-          <strong class="${isAchieved ? 'text-success' : 'text-primary'}">${progressPct}%</strong>
+          <span class="text-muted fs-xs">${progressLabel}</span>
+          <strong class="${isAchieved ? 'text-success' : (isOverdue ? 'text-danger' : 'text-primary')}">${progressPct}%</strong>
         </div>
         <div class="progress" style="height: 8px;">
           <div class="progress-bar ${barColor} rounded-pill" role="progressbar" style="width: ${progressPct}%" aria-valuenow="${progressPct}" aria-valuemin="0" aria-valuemax="100"></div>
@@ -2299,21 +2671,822 @@ function renderGoals(goals) {
 }
 
 /**
+ * Prepares the Set Goal modal for creating a fresh goal.
+ */
+function openCreateGoalModal() {
+  const goalIdInput = document.getElementById("goalIdInput");
+  const modalLabel = document.getElementById("setGoalModalLabel");
+  const modalSubLabel = document.getElementById("setGoalModalSubLabel");
+  const form = document.getElementById("setGoalForm");
+  const habitSelect = document.getElementById("goalHabitSelect");
+  const typeSelect = document.getElementById("goalTargetTypeSelect");
+  const weeklySliderContainer = document.getElementById("goalWeeklySliderContainer");
+  const numberInputContainer = document.getElementById("goalNumberInputContainer");
+  const rangeInput = document.getElementById("goalTargetValueRange");
+  const displaySpan = document.getElementById("goalTargetValueDisplay");
+  const endDateInput = document.getElementById("goalEndDateInput");
+
+  if (goalIdInput) goalIdInput.value = "";
+  if (modalLabel) modalLabel.textContent = "Set Habit Goal";
+  if (modalSubLabel) modalSubLabel.textContent = "Define measurable targets linked to habits.";
+  if (form) form.classList.remove("was-validated");
+
+  if (typeSelect) {
+    typeSelect.value = "weekly_completions";
+    typeSelect.disabled = false;
+  }
+  if (habitSelect) habitSelect.disabled = false;
+  if (weeklySliderContainer) weeklySliderContainer.classList.remove("d-none");
+  if (numberInputContainer) numberInputContainer.classList.add("d-none");
+  if (rangeInput) rangeInput.value = "5";
+  if (displaySpan) displaySpan.textContent = "5 days";
+  if (endDateInput) endDateInput.value = "";
+
+  populateGoalHabitSelect();
+}
+
+/**
+ * Prepares the Set Goal modal for editing an existing goal.
+ */
+function openEditGoalModal(goalId) {
+  const goal = currentGoals.find(g => g.id === goalId);
+  if (!goal) return;
+
+  const goalIdInput = document.getElementById("goalIdInput");
+  const modalLabel = document.getElementById("setGoalModalLabel");
+  const modalSubLabel = document.getElementById("setGoalModalSubLabel");
+  const habitSelect = document.getElementById("goalHabitSelect");
+  const typeSelect = document.getElementById("goalTargetTypeSelect");
+  const rangeInput = document.getElementById("goalTargetValueRange");
+  const displaySpan = document.getElementById("goalTargetValueDisplay");
+  const numberInput = document.getElementById("goalTargetValueNumber");
+  const endDateInput = document.getElementById("goalEndDateInput");
+  const modalEl = document.getElementById("setGoalModal");
+
+  if (goalIdInput) goalIdInput.value = goal.id;
+  if (modalLabel) modalLabel.textContent = "Edit Habit Goal";
+  if (modalSubLabel) modalSubLabel.textContent = `Update measurable targets for ${goal.habit_name}`;
+
+  populateGoalHabitSelect();
+  if (habitSelect) {
+    habitSelect.value = String(goal.habit_id);
+    habitSelect.disabled = true; // Habit association is fixed when editing
+  }
+
+  const targetType = goal.target_type || "weekly_completions";
+  if (typeSelect) {
+    typeSelect.value = targetType;
+    typeSelect.dispatchEvent(new Event("change"));
+  }
+
+  if (targetType === "weekly_completions") {
+    if (rangeInput) rangeInput.value = goal.target_value;
+    if (displaySpan) displaySpan.textContent = `${goal.target_value} ${goal.target_value == 1 ? "day" : "days"}`;
+  } else {
+    if (numberInput) numberInput.value = goal.target_value;
+  }
+
+  if (endDateInput) {
+    endDateInput.value = goal.end_date || "";
+  }
+
+  if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
+    const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
+    inst.show();
+  }
+}
+
+/**
  * Removes a habit target using DELETE /api/goals/<id>.
  */
 async function deleteGoal(goalId) {
-  const confirmed = window.confirm("Remove this weekly target?");
+  const confirmed = window.confirm("Remove this habit goal?");
   if (!confirmed) return;
 
   try {
     const res = await fetch(`/api/goals/${goalId}`, { method: "DELETE" });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    showToast("Goal target removed.", "info");
+    showToast("Goal removed successfully.", "info");
     loadGoalsAndMilestones();
+    loadProgressReport(currentReportType, currentReportDate);
   } catch (err) {
     console.error("Failed to delete goal:", err);
     showToast(`Could not remove goal: ${err.message}`, "danger");
   }
 }
+
+// ----------------------------------------------------------------------------
+// 13. PHASE 8: SMART REMINDERS, PROGRESS REPORTS & CSV EXPORT
+// ----------------------------------------------------------------------------
+
+/**
+ * Initializes Phase 8 features: event listeners, permission state, 60s ticker.
+ */
+function initPhase8() {
+  currentReportDate = getTodayDateString();
+  const dateInput = document.getElementById("reportDateInput");
+  if (dateInput) {
+    dateInput.value = currentReportDate;
+  }
+
+  // Check and display initial Notification permission status
+  updateNotificationPermissionUI();
+
+  // Set up event listeners for Phase 8 controls
+  setupPhase8EventListeners();
+
+  // Start periodic 60s reminder ticker (no excessive polling)
+  if (!reminderTickerInterval) {
+    reminderTickerInterval = setInterval(checkRemindersTick, 60000);
+  }
+
+  // Initial reminder check for current minute
+  checkRemindersTick();
+}
+
+/**
+ * Sets up user event listeners for Phase 8 controls.
+ */
+function setupPhase8EventListeners() {
+  // Report period buttons (Daily, Weekly, Monthly)
+  const reportTypeButtons = document.querySelectorAll(".report-type-btn");
+  reportTypeButtons.forEach(btn => {
+    btn.addEventListener("click", () => {
+      reportTypeButtons.forEach(b => b.classList.remove("active"));
+      btn.classList.add("active");
+      currentReportType = btn.getAttribute("data-type") || "weekly";
+      loadProgressReport(currentReportType, currentReportDate);
+    });
+  });
+
+  // Report date picker input
+  const dateInput = document.getElementById("reportDateInput");
+  if (dateInput) {
+    dateInput.addEventListener("change", (e) => {
+      const val = e.target.value;
+      if (val) {
+        currentReportDate = val;
+        loadProgressReport(currentReportType, currentReportDate);
+      }
+    });
+  }
+
+  // Report refresh button
+  const refreshReportBtn = document.getElementById("btnRefreshReport");
+  if (refreshReportBtn) {
+    refreshReportBtn.addEventListener("click", () => {
+      loadProgressReport(currentReportType, currentReportDate);
+    });
+  }
+
+  // Direct CSV download button in report card header
+  const btnDownloadReportCsv = document.getElementById("btnDownloadReportCsv");
+  if (btnDownloadReportCsv) {
+    btnDownloadReportCsv.addEventListener("click", () => {
+      const url = `/api/export?type=report&report_type=${encodeURIComponent(currentReportType)}&date=${encodeURIComponent(currentReportDate)}`;
+      window.location.href = url;
+    });
+  }
+
+  // Request browser permission button in Settings Modal (strict user action requirement)
+  const btnRequestPerm = document.getElementById("btnRequestBrowserPermission");
+  if (btnRequestPerm) {
+    btnRequestPerm.addEventListener("click", () => {
+      requestBrowserNotificationPermission();
+    });
+  }
+
+  // Reminder form submission (Save / Update)
+  const reminderForm = document.getElementById("reminderForm");
+  if (reminderForm) {
+    reminderForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      await saveReminderFromModal();
+    });
+  }
+
+  // Delete reminder button in Reminder Modal
+  const btnDeleteReminder = document.getElementById("btnDeleteReminder");
+  if (btnDeleteReminder) {
+    btnDeleteReminder.addEventListener("click", async () => {
+      const habitIdInput = document.getElementById("reminderHabitIdInput");
+      const habitId = habitIdInput ? parseInt(habitIdInput.value, 10) : null;
+      if (habitId) {
+        await deleteReminderByHabitId(habitId);
+      }
+    });
+  }
+}
+
+/**
+ * Updates UI permission badges and buttons based on browser Notifications API status.
+ */
+function updateNotificationPermissionUI() {
+  const badge = document.getElementById("notificationPermissionBadge");
+  const icon = document.getElementById("notificationStatusIcon");
+  const iconBox = document.getElementById("notificationStatusIconBox");
+  const desc = document.getElementById("notificationPermissionDesc");
+  const reqBtn = document.getElementById("btnRequestBrowserPermission");
+  const navBellIcon = document.getElementById("navBellIcon");
+
+  if (!("Notification" in window)) {
+    if (badge) { badge.textContent = "Unsupported"; badge.className = "badge bg-secondary rounded-pill small"; }
+    if (desc) desc.textContent = "Your current browser context does not support the Web Notifications API. StreakLab will automatically use in-app companion alert banners.";
+    if (reqBtn) { reqBtn.disabled = true; reqBtn.textContent = "Unsupported in Browser"; }
+    if (navBellIcon) navBellIcon.className = "bi bi-bell-slash text-muted";
+    return;
+  }
+
+  const permission = Notification.permission;
+
+  if (permission === "granted") {
+    if (badge) { badge.textContent = "Granted"; badge.className = "badge bg-success rounded-pill small"; }
+    if (icon) icon.className = "bi bi-bell-fill text-success";
+    if (iconBox) iconBox.className = "metric-icon-box bg-emerald-subtle text-emerald border-0";
+    if (desc) desc.textContent = "Notifications are enabled! You will receive timely alerts when scheduled reminders occur while this site is open.";
+    if (reqBtn) { reqBtn.disabled = true; reqBtn.innerHTML = `<i class="bi bi-check-circle-fill me-1"></i>Notifications Enabled`; reqBtn.className = "btn btn-sm btn-success rounded-pill px-3 py-2 flex-shrink-0"; }
+    if (navBellIcon) navBellIcon.className = "bi bi-bell-fill text-success";
+  } else if (permission === "denied") {
+    if (badge) { badge.textContent = "Denied / Blocked"; badge.className = "badge bg-danger rounded-pill small"; }
+    if (icon) icon.className = "bi bi-bell-slash-fill text-danger";
+    if (iconBox) iconBox.className = "metric-icon-box bg-rose-subtle text-danger border-0";
+    if (desc) desc.textContent = "Browser notifications are blocked in your browser site settings. StreakLab will display useful in-app companion alerts on your dashboard.";
+    if (reqBtn) { reqBtn.disabled = true; reqBtn.innerHTML = `<i class="bi bi-lock-fill me-1"></i>Blocked in Browser`; reqBtn.className = "btn btn-sm btn-outline-danger rounded-pill px-3 py-2 flex-shrink-0"; }
+    if (navBellIcon) navBellIcon.className = "bi bi-bell-slash-fill text-danger";
+  } else {
+    // 'default' (not requested yet)
+    if (badge) { badge.textContent = "Not Requested Yet"; badge.className = "badge bg-warning text-dark rounded-pill small"; }
+    if (icon) icon.className = "bi bi-bell text-warning";
+    if (iconBox) iconBox.className = "metric-icon-box bg-orange-subtle text-orange border-0";
+    if (desc) desc.textContent = "Enable notifications to receive timely system popups when it's time to check in on your habits.";
+    if (reqBtn) { reqBtn.disabled = false; reqBtn.innerHTML = `<i class="bi bi-bell-fill me-1"></i>Enable Notifications`; reqBtn.className = "btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0"; }
+    if (navBellIcon) navBellIcon.className = "bi bi-bell text-warning";
+  }
+}
+
+/**
+ * Requests browser notification permission strictly upon user interaction.
+ */
+async function requestBrowserNotificationPermission() {
+  if (!("Notification" in window)) {
+    showToast("Web Notifications are unsupported in this browser environment.", "warning");
+    return;
+  }
+
+  try {
+    const result = await Notification.requestPermission();
+    updateNotificationPermissionUI();
+
+    if (result === "granted") {
+      showToast("Browser notifications enabled! 🔔", "success");
+      try {
+        new Notification("StreakLab Reminders Active", {
+          body: "Scheduled reminders will notify you when habits are due.",
+          icon: "/static/favicon.ico"
+        });
+      } catch (e) {
+        console.warn("Test notification notice:", e);
+      }
+    } else if (result === "denied") {
+      showToast("Notifications were denied. In-app dashboard banners will be used instead.", "info");
+    }
+  } catch (err) {
+    console.error("Failed to request notification permission:", err);
+  }
+}
+
+/**
+ * Loads all configured habit reminders from /api/reminders.
+ */
+async function loadRemindersList() {
+  const container = document.getElementById("settingsRemindersList");
+  const countLabel = document.getElementById("activeRemindersCountLabel");
+
+  try {
+    const res = await fetch("/api/reminders");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+    configuredReminders = Array.isArray(data) ? data : [];
+
+    const activeCount = configuredReminders.filter(r => r.enabled).length;
+    if (countLabel) {
+      countLabel.textContent = `${activeCount} active reminder${activeCount === 1 ? '' : 's'}`;
+    }
+
+    if (container) {
+      if (configuredReminders.length === 0) {
+        container.innerHTML = `
+          <div class="text-center py-4 text-muted small bg-white rounded-3 border">
+            <i class="bi bi-alarm fs-4 d-block mb-1 text-muted"></i>
+            No habit reminders configured yet. Click <strong>Set Reminder</strong> on any habit card to schedule one.
+          </div>
+        `;
+      } else {
+        container.innerHTML = configuredReminders.map(r => `
+          <div class="p-2 px-3 rounded-3 bg-white border d-flex align-items-center justify-content-between gap-2">
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge ${r.enabled ? 'bg-warning-subtle text-warning-emphasis' : 'bg-secondary-subtle text-secondary'} rounded-pill small">
+                <i class="bi bi-clock me-1"></i>${escapeHtml(r.reminder_time)}
+              </span>
+              <strong class="small text-dark">${escapeHtml(r.habit_name)}</strong>
+              ${r.is_completed_today ? '<span class="badge bg-success-subtle text-success rounded-pill fs-xxs">Done today</span>' : ''}
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1 fs-xs" onclick="openReminderModal(${r.habit_id})">
+                <i class="bi bi-pencil me-1"></i>Edit
+              </button>
+            </div>
+          </div>
+        `).join("");
+      }
+    }
+
+  } catch (err) {
+    console.error("Failed to load reminders:", err);
+  }
+}
+
+/**
+ * Opens reminder configuration modal for a specific habit.
+ */
+function openReminderModal(habitId) {
+  const habit = habits.find(h => h.id === habitId);
+  if (!habit) return;
+
+  const idInput = document.getElementById("reminderHabitIdInput");
+  const nameDisplay = document.getElementById("reminderHabitNameDisplay");
+  const timeInput = document.getElementById("reminderTimeInput");
+  const enabledSwitch = document.getElementById("reminderEnabledSwitch");
+  const deleteBtn = document.getElementById("btnDeleteReminder");
+  const modalEl = document.getElementById("reminderModal");
+
+  if (idInput) idInput.value = habit.id;
+  if (nameDisplay) nameDisplay.textContent = habit.name;
+
+  const existingRem = habit.reminder || configuredReminders.find(r => r.habit_id === habitId);
+
+  if (existingRem) {
+    if (timeInput) timeInput.value = existingRem.reminder_time || "08:00";
+    if (enabledSwitch) enabledSwitch.checked = Boolean(existingRem.enabled);
+    if (deleteBtn) deleteBtn.classList.remove("d-none");
+  } else {
+    if (timeInput) timeInput.value = "08:00";
+    if (enabledSwitch) enabledSwitch.checked = true;
+    if (deleteBtn) deleteBtn.classList.add("d-none");
+  }
+
+  if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
+    const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
+    inst.show();
+  }
+}
+
+/**
+ * Saves or updates habit reminder via POST /api/reminders.
+ */
+async function saveReminderFromModal() {
+  const idInput = document.getElementById("reminderHabitIdInput");
+  const timeInput = document.getElementById("reminderTimeInput");
+  const enabledSwitch = document.getElementById("reminderEnabledSwitch");
+  const saveBtn = document.getElementById("btnSaveReminder");
+  const modalEl = document.getElementById("reminderModal");
+
+  const habitId = idInput ? parseInt(idInput.value, 10) : null;
+  const reminderTime = timeInput ? timeInput.value : "08:00";
+  const enabled = enabledSwitch ? enabledSwitch.checked : true;
+
+  if (!habitId) return;
+
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Saving...`;
+  }
+
+  try {
+    const res = await fetch("/api/reminders", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        habit_id: habitId,
+        reminder_time: reminderTime,
+        enabled: enabled
+      })
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error || `Server error (${res.status})`);
+    }
+
+    const saved = await res.json();
+    showToast(`Reminder scheduled for ${saved.reminder_time}! ⏰`, "success");
+
+    // Close modal
+    if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
+      const inst = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+      if (inst) inst.hide();
+    }
+
+    // Refresh habits & reminders
+    await loadHabitsFromApi();
+
+  } catch (err) {
+    console.error("Failed to save reminder:", err);
+    showToast(`Could not save reminder: ${err.message}`, "danger");
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save Reminder`;
+    }
+  }
+}
+
+/**
+ * Deletes habit reminder via DELETE /api/reminders/<habit_id>.
+ */
+async function deleteReminderByHabitId(habitId) {
+  const confirmed = window.confirm("Delete reminder for this habit?");
+  if (!confirmed) return;
+
+  try {
+    const res = await fetch(`/api/reminders/${habitId}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    showToast("Reminder deleted.", "info");
+
+    const modalEl = document.getElementById("reminderModal");
+    if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
+      const inst = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+      if (inst) inst.hide();
+    }
+
+    await loadHabitsFromApi();
+  } catch (err) {
+    console.error("Failed to delete reminder:", err);
+    showToast(`Could not delete reminder: ${err.message}`, "danger");
+  }
+}
+
+/**
+ * 60-second ticker: checks active reminders against current local time (HH:MM).
+ * Strictly avoids notifying if the habit is already completed today or was already notified.
+ */
+function checkRemindersTick() {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const currentHHMM = `${hours}:${minutes}`;
+  const today = getTodayDateString();
+
+  // Clean old date notifications from Set to prevent memory leaks
+  notifiedRemindersToday.forEach(key => {
+    if (!key.startsWith(today)) {
+      notifiedRemindersToday.delete(key);
+    }
+  });
+
+  // Collect active reminders from configuredReminders or habits
+  const activeList = configuredReminders.length > 0
+    ? configuredReminders
+    : habits.filter(h => h.reminder && h.reminder.enabled).map(h => ({
+        habit_id: h.id,
+        habit_name: h.name,
+        reminder_time: h.reminder.reminder_time,
+        enabled: h.reminder.enabled ? 1 : 0
+      }));
+
+  activeList.forEach(r => {
+    if (!r.enabled) return;
+    if (r.reminder_time !== currentHHMM) return;
+
+    const habit = habits.find(h => h.id === r.habit_id);
+    const habitName = habit ? habit.name : (r.habit_name || `Habit #${r.habit_id}`);
+
+    // RULE 6: Do not notify for a habit that is already completed for the relevant day!
+    if (habit && habit.status === "completed") return;
+
+    // RULE 5: Avoid repeatedly notifying users for the same reminder during the same scheduled occurrence
+    const occurrenceKey = `${today}_${r.habit_id}_${r.reminder_time}`;
+    if (notifiedRemindersToday.has(occurrenceKey)) return;
+
+    // Double check localStorage for multi-tab suppression
+    const storageKey = `streaklab_reminded_${occurrenceKey}`;
+    try {
+      if (localStorage.getItem(storageKey)) {
+        notifiedRemindersToday.add(occurrenceKey);
+        return;
+      }
+      localStorage.setItem(storageKey, "1");
+    } catch (e) {}
+
+    notifiedRemindersToday.add(occurrenceKey);
+
+    // 1. Browser Notification if permitted
+    let browserFired = false;
+    if ("Notification" in window && Notification.permission === "granted") {
+      try {
+        new Notification(`StreakLab: ${habitName}`, {
+          body: `Scheduled habit reminder for ${r.reminder_time}. Keep your streak alive!`,
+          icon: "/static/favicon.ico"
+        });
+        browserFired = true;
+      } catch (err) {
+        console.warn("Could not fire browser notification:", err);
+      }
+    }
+
+    // 2. Useful In-App Companion / Fallback Banner (guaranteed visibility)
+    showInAppReminderAlert(r.habit_id, habitName, r.reminder_time, browserFired);
+  });
+}
+
+/**
+ * Displays an in-app companion alert banner at the top of the dashboard.
+ */
+function showInAppReminderAlert(habitId, habitName, reminderTime, browserFired) {
+  const container = document.getElementById("inAppReminderAlertContainer");
+  if (!container) return;
+
+  const alertId = `reminderAlert_${habitId}`;
+  if (document.getElementById(alertId)) return; // Already visible
+
+  const alertDiv = document.createElement("div");
+  alertDiv.id = alertId;
+  alertDiv.className = "reminder-alert-banner d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-3 mb-3";
+
+  const noteText = browserFired
+    ? "Notification dispatched to your browser."
+    : "Browser notification is disabled or unsupported — reminder displayed in-app.";
+
+  alertDiv.innerHTML = `
+    <div class="d-flex align-items-center gap-3">
+      <div class="metric-icon-box bg-white text-warning reminder-icon-pulse flex-shrink-0">
+        <i class="bi bi-alarm-fill fs-4"></i>
+      </div>
+      <div>
+        <div class="d-flex align-items-center gap-2 mb-1">
+          <strong class="text-dark small">Habit Reminder (${escapeHtml(reminderTime)})</strong>
+          <span class="badge bg-warning text-dark rounded-pill fs-xxs">Scheduled Alert</span>
+        </div>
+        <p class="mb-0 text-muted small">
+          Time to complete "<strong>${escapeHtml(habitName)}</strong>"! ${noteText}
+        </p>
+      </div>
+    </div>
+    <div class="d-flex align-items-center gap-2 align-self-end align-self-sm-center flex-shrink-0">
+      <button type="button" class="btn btn-sm btn-success rounded-pill px-3 py-1 shadow-sm" onclick="handleStatusChange(${habitId}, 'completed'); document.getElementById('${alertId}')?.remove();">
+        <i class="bi bi-check-lg me-1"></i>Mark Done
+      </button>
+      <button type="button" class="btn btn-sm btn-light border rounded-pill px-3 py-1" onclick="document.getElementById('${alertId}')?.remove();">
+        Dismiss
+      </button>
+    </div>
+  `;
+
+  container.prepend(alertDiv);
+}
+
+/**
+ * Loads daily, weekly, or monthly progress report from /api/reports.
+ */
+async function loadProgressReport(reportType = "weekly", targetDateStr = null) {
+  const container = document.getElementById("progressReportContent");
+  const periodHeaderLabel = document.getElementById("reportHeaderPeriodLabel");
+  const exportReportLink = document.getElementById("exportReportLink");
+  const exportReportLabel = document.getElementById("exportReportLabel");
+
+  const type = reportType || currentReportType || "weekly";
+  const dateStr = targetDateStr || currentReportDate || getTodayDateString();
+
+  currentReportType = type;
+  currentReportDate = dateStr;
+
+  // Update export links in CSV export card
+  if (exportReportLink) {
+    exportReportLink.href = `/api/export?type=report&report_type=${encodeURIComponent(type)}&date=${encodeURIComponent(dateStr)}`;
+  }
+  if (exportReportLabel) {
+    const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+    exportReportLabel.textContent = `Active ${typeLabel} breakdown (${dateStr})`;
+  }
+
+  try {
+    const res = await fetch(`/api/reports?type=${encodeURIComponent(type)}&date=${encodeURIComponent(dateStr)}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    const data = await res.json();
+    currentReportData = data;
+
+    if (periodHeaderLabel && data.period) {
+      periodHeaderLabel.textContent = `${data.period.start_date} – ${data.period.end_date} (${data.report_type.toUpperCase()})`;
+    }
+
+    renderProgressReport(data);
+  } catch (err) {
+    console.error("Failed to load progress report:", err);
+    if (container) {
+      container.innerHTML = `
+        <div class="text-center py-4 text-muted small">
+          <i class="bi bi-exclamation-triangle text-warning me-1"></i>
+          Unable to generate progress report. <button class="btn btn-sm btn-link p-0" onclick="loadProgressReport(currentReportType, currentReportDate)">Retry</button>
+        </div>
+      `;
+    }
+  }
+}
+
+/**
+ * Renders verified progress report content with KPIs, highlights, tables, and goal progress.
+ */
+function renderProgressReport(data) {
+  const container = document.getElementById("progressReportContent");
+  if (!container || !data) return;
+
+  const dataStatus = data.data_status || "no_data";
+  const period = data.period || {};
+  const stats = data.summary || {};
+  const habitsList = Array.isArray(data.habits) ? data.habits : [];
+  const goalsSummary = data.goals_summary || {};
+  const successfulHabits = Array.isArray(data.successful_habits) ? data.successful_habits : [];
+  const attentionHabits = Array.isArray(data.habits_needing_attention) ? data.habits_needing_attention : [];
+
+  // Report metadata bar
+  const metaHtml = `
+    <div class="d-flex flex-column flex-sm-row justify-content-between align-items-sm-center gap-2 p-2 px-3 rounded-3 bg-light border mb-3 small text-muted">
+      <div>
+        <i class="bi bi-calendar-range me-1 text-primary"></i>
+        <strong>Period:</strong> ${escapeHtml(period.start_date || "")} to ${escapeHtml(period.end_date || "")} (${data.report_type.toUpperCase()})
+      </div>
+      <div>
+        <i class="bi bi-clock-history me-1"></i>
+        <strong>Generated:</strong> ${escapeHtml(data.generated_at || "")}
+      </div>
+    </div>
+  `;
+
+  // Empty data state
+  if (dataStatus === "no_data") {
+    container.innerHTML = `
+      ${metaHtml}
+      <div class="text-center py-5 text-muted small bg-light rounded-4 border">
+        <div class="empty-icon-circle mx-auto mb-2" style="width: 50px; height: 50px; border-radius: 50%; background: #f1f5f9; display: flex; align-items: center; justify-content: center;">
+          <i class="bi bi-journal-x fs-4 text-muted"></i>
+        </div>
+        <h6 class="fw-bold mb-1 text-dark">No Check-ins Recorded</h6>
+        <p class="text-muted small mb-0">There are no check-in records logged for this ${escapeHtml(data.report_type)} period (${escapeHtml(period.start_date || "")} to ${escapeHtml(period.end_date || "")}).</p>
+      </div>
+    `;
+    return;
+  }
+
+  // 1. KPI Summary Grid
+  const kpiGridHtml = `
+    <div class="row g-2 mb-3">
+      <div class="col-6 col-md-3">
+        <div class="report-kpi-card">
+          <small class="text-muted d-block fw-semibold fs-xxs">TOTAL CHECK-INS</small>
+          <h5 class="fw-bold mb-0 text-dark">${stats.total_records || 0}</h5>
+          <span class="fs-xxs text-muted">${stats.active_habits_count || 0} habits tracked</span>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="report-kpi-card">
+          <small class="text-muted d-block fw-semibold fs-xxs">COMPLETION PACE</small>
+          <h5 class="fw-bold mb-0 text-emerald">${stats.completion_rate || 0}%</h5>
+          <span class="fs-xxs text-success">${stats.completed || 0} completed</span>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="report-kpi-card">
+          <small class="text-muted d-block fw-semibold fs-xxs">MISSED / SKIPPED</small>
+          <h5 class="fw-bold mb-0 text-dark">${(stats.missed || 0) + (stats.skipped || 0)}</h5>
+          <span class="fs-xxs text-muted">${stats.missed || 0} missed &bull; ${stats.skipped || 0} skipped</span>
+        </div>
+      </div>
+      <div class="col-6 col-md-3">
+        <div class="report-kpi-card">
+          <small class="text-muted d-block fw-semibold fs-xxs">CURRENT / BEST STREAK</small>
+          <h5 class="fw-bold mb-0 text-primary">${stats.current_streak || 0}d / ${stats.best_streak || 0}d</h5>
+          <span class="fs-xxs text-muted">Consistency record</span>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // 2. Highlights Row: Successful vs Needs Attention
+  let highlightsHtml = "";
+  const successChips = successfulHabits.map(h => `
+    <span class="badge bg-success text-white rounded-pill p-1 px-2 me-1 mb-1 small fw-medium">
+      <i class="bi bi-star-fill me-1"></i>${escapeHtml(h.name)} (${h.completion_rate}%)
+    </span>
+  `).join("");
+
+  const attentionChips = attentionHabits.map(h => `
+    <span class="badge bg-danger text-white rounded-pill p-1 px-2 me-1 mb-1 small fw-medium">
+      <i class="bi bi-exclamation-circle-fill me-1"></i>${escapeHtml(h.name)} (${h.completion_rate}%)
+    </span>
+  `).join("");
+
+  if (successfulHabits.length > 0 || attentionHabits.length > 0) {
+    highlightsHtml = `
+      <div class="row g-2 mb-3">
+        <div class="col-md-6">
+          <div class="report-highlight-success h-100">
+            <strong class="d-block text-success small mb-1"><i class="bi bi-trophy-fill me-1"></i>Top Performing Habits (&ge;80%):</strong>
+            <div>${successChips || '<span class="text-muted fs-xxs">None reached &ge;80% in this period.</span>'}</div>
+          </div>
+        </div>
+        <div class="col-md-6">
+          <div class="report-highlight-warning h-100">
+            <strong class="d-block text-danger small mb-1"><i class="bi bi-shield-exclamation me-1"></i>Habits Needing Attention (&lt;50%):</strong>
+            <div>${attentionChips || '<span class="text-muted fs-xxs">Great job! No habits below 50%.</span>'}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  // 3. Habit Breakdown Table
+  let tableRows = habitsList.map(h => {
+    let statusBadge = "";
+    if (h.performance_status === "strong") {
+      statusBadge = `<span class="badge bg-success-subtle text-success rounded-pill small">Strong</span>`;
+    } else if (h.performance_status === "moderate") {
+      statusBadge = `<span class="badge bg-warning-subtle text-warning-emphasis rounded-pill small">Moderate</span>`;
+    } else {
+      statusBadge = `<span class="badge bg-danger-subtle text-danger rounded-pill small">Needs Attention</span>`;
+    }
+
+    return `
+      <tr>
+        <td>
+          <strong class="text-dark">${escapeHtml(h.name)}</strong>
+        </td>
+        <td>
+          <span class="badge bg-primary-subtle text-primary rounded-pill fs-xxs">${escapeHtml(h.category || "General")}</span>
+        </td>
+        <td>
+          <span class="text-dark fw-medium">${h.completions}</span> / ${h.total_days}
+        </td>
+        <td>
+          <strong>${h.completion_rate}%</strong>
+        </td>
+        <td>
+          <span class="text-muted">${h.current_streak}d</span> / <span class="text-dark fw-bold">${h.best_streak}d</span>
+        </td>
+        <td>
+          ${statusBadge}
+        </td>
+      </tr>
+    `;
+  }).join("");
+
+  const tableHtml = `
+    <div class="report-table-wrapper mb-3">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 report-table">
+          <thead>
+            <tr>
+              <th>Habit Name</th>
+              <th>Category</th>
+              <th>Completions</th>
+              <th>Rate</th>
+              <th>Current / Best</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+
+  // 4. Goals Summary in Report
+  let goalsSummaryHtml = "";
+  if (goalsSummary && typeof goalsSummary.total_goals === "number" && goalsSummary.total_goals > 0) {
+    goalsSummaryHtml = `
+      <div class="p-2 px-3 rounded-3 bg-light border d-flex flex-wrap align-items-center justify-content-between gap-2 small">
+        <span class="text-muted"><strong>Linked Goals Status:</strong> ${goalsSummary.total_goals} Total</span>
+        <div class="d-flex align-items-center gap-2">
+          <span class="badge badge-status-active rounded-pill">${goalsSummary.active || 0} Active</span>
+          <span class="badge badge-status-completed rounded-pill">${goalsSummary.completed || 0} Completed</span>
+          <span class="badge badge-status-overdue rounded-pill">${goalsSummary.overdue || 0} Overdue</span>
+        </div>
+      </div>
+    `;
+  }
+
+  container.innerHTML = `
+    ${metaHtml}
+    ${kpiGridHtml}
+    ${highlightsHtml}
+    ${tableHtml}
+    ${goalsSummaryHtml}
+  `;
+}
+
 
 

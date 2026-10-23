@@ -13,17 +13,24 @@ Phase 2B: SQLite Database Integration & RESTful API
 """
 
 import os
+import csv
+import io
+import re
 import logging
 import sqlite3
 from datetime import datetime, timedelta, date
-from flask import Flask, render_template, jsonify, request, g
+from flask import Flask, render_template, jsonify, request, g, Response
 from pattern_engine import (
     analyze_habit_patterns,
     analyze_single_habit,
     get_habit_analytics,
     get_calendar_heatmap,
     generate_weekly_review,
-    calculate_goals_and_milestones
+    calculate_goals_and_milestones,
+    generate_progress_report,
+    calculate_current_streak,
+    calculate_best_streak,
+    parse_target_date
 )
 import ai_explainer
 
@@ -112,22 +119,55 @@ def init_db():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_records_habit_date ON habit_records (habit_id, record_date);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_records_date ON habit_records (record_date);")
 
-        # Table 3: habit_goals (Phase 7: Weekly Completion Targets)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS habit_goals (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                habit_id INTEGER NOT NULL,
-                target_type TEXT NOT NULL DEFAULT 'weekly_completions',
-                target_value INTEGER NOT NULL CHECK(target_value >= 1 AND target_value <= 7),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                active INTEGER DEFAULT 1,
-                FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
-                UNIQUE (habit_id, target_type)
-            );
-        """)
+        # Table 3: habit_goals (Phase 7 & 8: Weekly, Streak, and Total Targets)
+        # Safe migration if table previously had target_value <= 7 check constraint
+        cur = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='habit_goals'")
+        goal_table_row = cur.fetchone()
+        if goal_table_row and "target_value <= 7" in goal_table_row[0]:
+            conn.execute("PRAGMA foreign_keys = OFF;")
+            conn.execute("""
+                CREATE TABLE habit_goals_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    habit_id INTEGER NOT NULL,
+                    target_type TEXT NOT NULL DEFAULT 'weekly_completions',
+                    target_value INTEGER NOT NULL CHECK(target_value >= 1),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active INTEGER DEFAULT 1,
+                    end_date TEXT DEFAULT NULL,
+                    FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
+                    UNIQUE (habit_id, target_type)
+                );
+            """)
+            conn.execute("""
+                INSERT INTO habit_goals_new (id, habit_id, target_type, target_value, created_at, updated_at, active)
+                SELECT id, habit_id, target_type, target_value, created_at, updated_at, active FROM habit_goals;
+            """)
+            conn.execute("DROP TABLE habit_goals;")
+            conn.execute("ALTER TABLE habit_goals_new RENAME TO habit_goals;")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_goals_habit ON habit_goals (habit_id);")
+            conn.execute("PRAGMA foreign_keys = ON;")
+        else:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS habit_goals (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    habit_id INTEGER NOT NULL,
+                    target_type TEXT NOT NULL DEFAULT 'weekly_completions',
+                    target_value INTEGER NOT NULL CHECK(target_value >= 1),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    active INTEGER DEFAULT 1,
+                    end_date TEXT DEFAULT NULL,
+                    FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
+                    UNIQUE (habit_id, target_type)
+                );
+            """)
+            # Ensure end_date column exists if table was created previously without it
+            cols = [r[1] for r in conn.execute("PRAGMA table_info(habit_goals)").fetchall()]
+            if 'end_date' not in cols:
+                conn.execute("ALTER TABLE habit_goals ADD COLUMN end_date TEXT DEFAULT NULL;")
 
-        # Table 4: goal_milestones (Phase 7: Achieved Milestones & Duplicate Prevention)
+        # Table 4: goal_milestones (Phase 7 & 8: Achieved Milestones & Duplicate Prevention)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS goal_milestones (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -143,8 +183,22 @@ def init_db():
             );
         """)
 
+        # Table 5: habit_reminders (Phase 8: Smart Reminders & Notifications)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS habit_reminders (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                habit_id INTEGER NOT NULL UNIQUE,
+                reminder_time TEXT NOT NULL,
+                enabled INTEGER DEFAULT 1,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE
+            );
+        """)
+
         conn.execute("CREATE INDEX IF NOT EXISTS idx_goals_habit ON habit_goals (habit_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_lookup ON goal_milestones (habit_id, milestone_period);")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_habit ON habit_reminders (habit_id);")
     conn.close()
 
 
@@ -280,6 +334,22 @@ def habit_to_dict(row, include_stats=True, target_date=None):
         weekly = get_habit_weekly_history(row["id"], target_date)
         habit_dict["weekly_history"] = weekly
         habit_dict["weeklyHistory"] = weekly
+
+    try:
+        rem_row = get_db().execute(
+            "SELECT reminder_time, enabled FROM habit_reminders WHERE habit_id = ?",
+            (row["id"],)
+        ).fetchone()
+        if rem_row:
+            habit_dict["reminder"] = {
+                "reminder_time": rem_row["reminder_time"],
+                "time": rem_row["reminder_time"],
+                "enabled": bool(rem_row["enabled"])
+            }
+        else:
+            habit_dict["reminder"] = None
+    except Exception:
+        habit_dict["reminder"] = None
 
     return habit_dict
 
@@ -905,8 +975,9 @@ def get_goals_api():
 @app.route('/api/goals', methods=['POST'])
 def save_goal_api():
     """
-    Phase 7: Set or update a habit's weekly completion target.
-    Expects JSON: { "habit_id": int, "target_value": int (1-7) }
+    Phase 7 & 8: Set or update a habit's target goal.
+    Supports weekly completions (1-7), target streak (>=1), and total completions (>=1).
+    Expects JSON: { "habit_id": int, "target_value": int, "target_type": str (optional), "end_date": str (optional) }
     """
     if not request.is_json:
         return jsonify({"error": "Request body must be JSON"}), 400
@@ -914,6 +985,8 @@ def save_goal_api():
     data = request.get_json() or {}
     habit_id = data.get('habit_id')
     target_value = data.get('target_value')
+    target_type = data.get('target_type', 'weekly_completions')
+    end_date = data.get('end_date')
 
     if habit_id is None:
         return jsonify({"error": "habit_id is required"}), 400
@@ -922,40 +995,69 @@ def save_goal_api():
     except (ValueError, TypeError):
         return jsonify({"error": "habit_id must be an integer"}), 400
 
+    if target_type not in ('weekly_completions', 'target_streak', 'total_completions'):
+        return jsonify({"error": "target_type must be weekly_completions, target_streak, or total_completions"}), 400
+
     if target_value is None:
         return jsonify({"error": "target_value is required"}), 400
     try:
         target_value = int(target_value)
-        if target_value < 1 or target_value > 7:
+        if target_type == 'weekly_completions' and (target_value < 1 or target_value > 7):
             return jsonify({"error": "target_value must be an integer between 1 and 7"}), 400
+        elif target_value < 1:
+            return jsonify({"error": "target_value must be an integer greater than or equal to 1"}), 400
     except (ValueError, TypeError):
-        return jsonify({"error": "target_value must be a valid integer between 1 and 7"}), 400
+        return jsonify({"error": "target_value must be a valid integer"}), 400
+
+    if end_date is not None and end_date != "":
+        try:
+            datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"error": "end_date must be in YYYY-MM-DD format"}), 400
+    else:
+        end_date = None
 
     db = get_db()
     habit = db.execute("SELECT id, name FROM habits WHERE id = ?", (habit_id,)).fetchone()
     if not habit:
         return jsonify({"error": "Habit not found"}), 404
 
-    # Check if goal already exists for this habit
+    # Check if goal already exists for this habit and target_type
     existing = db.execute(
-        "SELECT id FROM habit_goals WHERE habit_id = ? AND target_type = 'weekly_completions'",
-        (habit_id,)
+        "SELECT id FROM habit_goals WHERE habit_id = ? AND target_type = ?",
+        (habit_id, target_type)
     ).fetchone()
 
+    cols = [r[1] for r in db.execute("PRAGMA table_info(habit_goals)").fetchall()]
+    has_end_date = 'end_date' in cols
+
     if existing:
-        db.execute("""
-            UPDATE habit_goals
-            SET target_value = ?, active = 1, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-        """, (target_value, existing["id"]))
+        if has_end_date:
+            db.execute("""
+                UPDATE habit_goals
+                SET target_value = ?, active = 1, end_date = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (target_value, end_date, existing["id"]))
+        else:
+            db.execute("""
+                UPDATE habit_goals
+                SET target_value = ?, active = 1, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (target_value, existing["id"]))
         db.commit()
         goal_id = existing["id"]
         status_code = 200
     else:
-        cursor = db.execute("""
-            INSERT INTO habit_goals (habit_id, target_type, target_value, active)
-            VALUES (?, 'weekly_completions', ?, 1)
-        """, (habit_id, target_value))
+        if has_end_date:
+            cursor = db.execute("""
+                INSERT INTO habit_goals (habit_id, target_type, target_value, active, end_date)
+                VALUES (?, ?, ?, 1, ?)
+            """, (habit_id, target_type, target_value, end_date))
+        else:
+            cursor = db.execute("""
+                INSERT INTO habit_goals (habit_id, target_type, target_value, active)
+                VALUES (?, ?, ?, 1)
+            """, (habit_id, target_type, target_value))
         db.commit()
         goal_id = cursor.lastrowid
         status_code = 201
@@ -966,6 +1068,68 @@ def save_goal_api():
     goal_payload = matched_goals[0] if matched_goals else {"id": goal_id, "habit_id": habit_id, "target_value": target_value}
 
     return jsonify(goal_payload), status_code
+
+
+@app.route('/api/goals/<int:goal_id>', methods=['PUT'])
+def update_goal_api(goal_id):
+    """
+    Phase 8: Update an existing habit goal.
+    Supports editing target_value, target_type, end_date, and active status.
+    """
+    if not request.is_json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    db = get_db()
+    existing = db.execute("SELECT * FROM habit_goals WHERE id = ?", (goal_id,)).fetchone()
+    if not existing:
+        return jsonify({"error": "Goal not found"}), 404
+
+    data = request.get_json() or {}
+    target_type = data.get('target_type', existing['target_type'])
+    if target_type not in ('weekly_completions', 'target_streak', 'total_completions'):
+        return jsonify({"error": "target_type must be weekly_completions, target_streak, or total_completions"}), 400
+
+    target_value = data.get('target_value', existing['target_value'])
+    try:
+        target_value = int(target_value)
+        if target_type == 'weekly_completions' and (target_value < 1 or target_value > 7):
+            return jsonify({"error": "target_value must be an integer between 1 and 7"}), 400
+        elif target_value < 1:
+            return jsonify({"error": "target_value must be an integer greater than or equal to 1"}), 400
+    except (ValueError, TypeError):
+        return jsonify({"error": "target_value must be a valid integer"}), 400
+
+    end_date = data.get('end_date')
+    if end_date is not None and end_date != "":
+        try:
+            datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError:
+            return jsonify({"error": "end_date must be in YYYY-MM-DD format"}), 400
+    else:
+        end_date = None
+
+    active = data.get('active', existing['active'])
+    active_val = 1 if active in (1, True, '1', 'true') else 0
+
+    cols = [r[1] for r in db.execute("PRAGMA table_info(habit_goals)").fetchall()]
+    if 'end_date' in cols:
+        db.execute("""
+            UPDATE habit_goals
+            SET target_value = ?, target_type = ?, end_date = ?, active = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (target_value, target_type, end_date, active_val, goal_id))
+    else:
+        db.execute("""
+            UPDATE habit_goals
+            SET target_value = ?, target_type = ?, active = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (target_value, target_type, active_val, goal_id))
+    db.commit()
+
+    progress_data = calculate_goals_and_milestones(habit_id=existing['habit_id'], db=db)
+    matched_goals = [g for g in progress_data.get("goals", []) if g["id"] == goal_id]
+    goal_payload = matched_goals[0] if matched_goals else {"id": goal_id, "target_value": target_value, "active": active_val}
+    return jsonify(goal_payload), 200
 
 
 @app.route('/api/goals/<int:goal_id>', methods=['DELETE'])
@@ -981,6 +1145,371 @@ def delete_goal_api(goal_id):
     db.execute("UPDATE habit_goals SET active = 0 WHERE id = ?", (goal_id,))
     db.commit()
     return jsonify({"message": "Goal removed successfully", "id": goal_id}), 200
+
+
+# ---------------------------------------------------------------------------
+# PHASE 8: SMART REMINDERS & NOTIFICATIONS REST API ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.route('/api/reminders', methods=['GET'])
+def get_reminders_api():
+    """
+    Phase 8: Retrieve all configured habit reminders with habit metadata.
+    Includes today's completion status so reminders do not trigger for completed habits.
+    """
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+    ref_date_str = target_date or date.today().isoformat()
+
+    db = get_db()
+    cursor = db.execute("""
+        SELECT r.id, r.habit_id, r.reminder_time, r.enabled, r.created_at, r.updated_at,
+               h.name as habit_name, h.category, h.time_of_day, h.active as habit_active
+        FROM habit_reminders r
+        JOIN habits h ON r.habit_id = h.id
+        WHERE h.active = 1
+        ORDER BY r.reminder_time ASC
+    """)
+    reminders = []
+    for row in cursor.fetchall():
+        hid = row["habit_id"]
+        # Check today's completion status
+        rec = db.execute(
+            "SELECT status FROM habit_records WHERE habit_id = ? AND record_date = ?",
+            (hid, ref_date_str)
+        ).fetchone()
+        is_completed = (rec is not None and rec["status"] == "completed")
+        today_status = rec["status"] if rec else "pending"
+
+        reminders.append({
+            "id": row["id"],
+            "habit_id": hid,
+            "habit_name": row["habit_name"],
+            "category": row["category"] or "General",
+            "time_of_day": row["time_of_day"] or "Morning",
+            "reminder_time": row["reminder_time"],
+            "enabled": bool(row["enabled"]),
+            "is_completed_today": is_completed,
+            "today_status": today_status,
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"])
+        })
+
+    return jsonify(reminders), 200
+
+
+@app.route('/api/reminders', methods=['POST'])
+def save_reminder_api():
+    """
+    Phase 8: Configure, create, or update a reminder time for a habit.
+    Expects JSON: { "habit_id": int, "reminder_time": "HH:MM", "enabled": bool (optional) }
+    """
+    if not request.is_json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    data = request.get_json() or {}
+    habit_id = data.get('habit_id')
+    reminder_time = data.get('reminder_time')
+    enabled = data.get('enabled', True)
+
+    if habit_id is None:
+        return jsonify({"error": "habit_id is required"}), 400
+    try:
+        habit_id = int(habit_id)
+    except (ValueError, TypeError):
+        return jsonify({"error": "habit_id must be an integer"}), 400
+
+    if not reminder_time or not isinstance(reminder_time, str):
+        return jsonify({"error": "reminder_time is required and must be a string (HH:MM)"}), 400
+
+    reminder_time = reminder_time.strip()
+    if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", reminder_time):
+        return jsonify({"error": "reminder_time must be in 24-hour HH:MM format (e.g. 08:30 or 19:45)"}), 400
+
+    enabled_val = 1 if enabled in (True, 1, '1', 'true', 'True') else 0
+
+    db = get_db()
+    habit = db.execute("SELECT id, name FROM habits WHERE id = ? AND active = 1", (habit_id,)).fetchone()
+    if not habit:
+        return jsonify({"error": "Habit not found"}), 404
+
+    existing = db.execute("SELECT id FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()
+    if existing:
+        db.execute("""
+            UPDATE habit_reminders
+            SET reminder_time = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE habit_id = ?
+        """, (reminder_time, enabled_val, habit_id))
+        db.commit()
+        status_code = 200
+        rem_id = existing["id"]
+    else:
+        cursor = db.execute("""
+            INSERT INTO habit_reminders (habit_id, reminder_time, enabled)
+            VALUES (?, ?, ?)
+        """, (habit_id, reminder_time, enabled_val))
+        db.commit()
+        status_code = 201
+        rem_id = cursor.lastrowid
+
+    return jsonify({
+        "id": rem_id,
+        "habit_id": habit_id,
+        "habit_name": habit["name"],
+        "reminder_time": reminder_time,
+        "enabled": bool(enabled_val)
+    }), status_code
+
+
+@app.route('/api/reminders/<int:habit_id>', methods=['PUT'])
+def update_reminder_api(habit_id):
+    """
+    Phase 8: Edit reminder settings (time and enabled status) for a habit.
+    """
+    if not request.is_json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    db = get_db()
+    existing = db.execute("SELECT * FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()
+    if not existing:
+        return jsonify({"error": "Reminder not found for this habit"}), 404
+
+    data = request.get_json() or {}
+    reminder_time = data.get('reminder_time', existing['reminder_time'])
+    if reminder_time:
+        reminder_time = str(reminder_time).strip()
+        if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", reminder_time):
+            return jsonify({"error": "reminder_time must be in 24-hour HH:MM format"}), 400
+
+    enabled = data.get('enabled', existing['enabled'])
+    enabled_val = 1 if enabled in (True, 1, '1', 'true', 'True') else 0
+
+    db.execute("""
+        UPDATE habit_reminders
+        SET reminder_time = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE habit_id = ?
+    """, (reminder_time, enabled_val, habit_id))
+    db.commit()
+
+    habit = db.execute("SELECT name FROM habits WHERE id = ?", (habit_id,)).fetchone()
+    return jsonify({
+        "id": existing["id"],
+        "habit_id": habit_id,
+        "habit_name": habit["name"] if habit else "Habit",
+        "reminder_time": reminder_time,
+        "enabled": bool(enabled_val)
+    }), 200
+
+
+@app.route('/api/reminders/<int:habit_id>', methods=['DELETE'])
+def delete_reminder_api(habit_id):
+    """
+    Phase 8: Delete a habit reminder.
+    """
+    db = get_db()
+    existing = db.execute("SELECT id FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()
+    if not existing:
+        return jsonify({"error": "Reminder not found for this habit"}), 404
+
+    db.execute("DELETE FROM habit_reminders WHERE habit_id = ?", (habit_id,))
+    db.commit()
+    return jsonify({"message": "Reminder deleted successfully", "habit_id": habit_id}), 200
+
+
+# ---------------------------------------------------------------------------
+# PHASE 8: PROGRESS REPORTS & CSV EXPORT REST API ENDPOINTS
+# ---------------------------------------------------------------------------
+
+@app.route('/api/reports', methods=['GET'])
+def get_progress_report_api():
+    """
+    Phase 8: Daily, Weekly, and Monthly Progress Report API.
+    Query parameters:
+      - type: daily | weekly | monthly (default: weekly)
+      - date: YYYY-MM-DD reference date (defaults to today)
+    """
+    report_type = request.args.get('type', 'weekly').lower().strip()
+    if report_type not in ["daily", "weekly", "monthly"]:
+        return jsonify({"error": f"Invalid report type '{report_type}'. Supported: daily, weekly, monthly"}), 400
+
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+
+    db = get_db()
+    report = generate_progress_report(report_type=report_type, target_date_str=target_date, db=db)
+    return jsonify(report), 200
+
+
+def sanitize_csv_field(val):
+    """
+    Phase 8: Defuses spreadsheet formula injection in untrusted CSV fields.
+    If a string starts with '=', '+', '-', '@', '\t', or '\r', prepends a single quote "'".
+    """
+    if val is None:
+        return ""
+    s = str(val)
+    if s and s[0] in ('=', '+', '-', '@', '\t', '\r'):
+        return f"'{s}"
+    return s
+
+
+@app.route('/api/export', methods=['GET'])
+def export_csv_api():
+    """
+    Phase 8: Secure CSV Data Export.
+    Exports habit records, completion history, goals, milestones, or structured progress reports.
+    Uses UTF-8 encoding with BOM (utf-8-sig) for Excel compatibility.
+    Guarantees spreadsheet formula injection defense.
+    Query parameters:
+      - type: habits | records | goals | report (default: habits)
+      - report_type: daily | weekly | monthly (when type == 'report', default: weekly)
+      - date: YYYY-MM-DD reference date (defaults to today)
+    """
+    export_type = request.args.get('type', 'habits').lower().strip()
+    if export_type not in ["habits", "records", "goals", "report"]:
+        return jsonify({"error": f"Invalid export type '{export_type}'. Supported: habits, records, goals, report"}), 400
+
+    target_date, err = parse_date_param(request)
+    if err:
+        return jsonify({"error": err}), 400
+    ref_date_str = target_date or date.today().isoformat()
+
+    db = get_db()
+    output = io.StringIO()
+    writer = csv.writer(output, quoting=csv.QUOTE_MINIMAL)
+
+    if export_type == "records":
+        filename = f"streaklab_records_{ref_date_str}.csv"
+        headers = ["Record ID", "Habit ID", "Habit Name", "Category", "Record Date", "Status", "Created At", "Updated At"]
+        writer.writerow(headers)
+
+        cursor = db.execute("""
+            SELECT r.id, r.habit_id, r.record_date, r.status, r.created_at, r.updated_at,
+                   h.name as habit_name, h.category
+            FROM habit_records r
+            JOIN habits h ON r.habit_id = h.id
+            ORDER BY r.record_date DESC, r.habit_id ASC
+        """)
+        for row in cursor.fetchall():
+            writer.writerow([
+                sanitize_csv_field(row["id"]),
+                sanitize_csv_field(row["habit_id"]),
+                sanitize_csv_field(row["habit_name"]),
+                sanitize_csv_field(row["category"] or "General"),
+                sanitize_csv_field(row["record_date"]),
+                sanitize_csv_field(row["status"]),
+                sanitize_csv_field(row["created_at"]),
+                sanitize_csv_field(row["updated_at"])
+            ])
+
+    elif export_type == "goals":
+        filename = f"streaklab_goals_milestones_{ref_date_str}.csv"
+        headers = [
+            "Goal ID", "Habit ID", "Habit Name", "Category", "Target Type", "Target Value",
+            "Current Progress", "Progress %", "Status", "Target Deadline", "Milestone Type", "Achieved Period"
+        ]
+        writer.writerow(headers)
+
+        goals_data = calculate_goals_and_milestones(target_date_str=ref_date_str, db=db)
+        for g in goals_data.get("goals", []):
+            ms = g.get("milestone") or {}
+            writer.writerow([
+                sanitize_csv_field(g.get("id")),
+                sanitize_csv_field(g.get("habit_id")),
+                sanitize_csv_field(g.get("habit_name")),
+                sanitize_csv_field(g.get("category")),
+                sanitize_csv_field(g.get("target_type")),
+                sanitize_csv_field(g.get("target_value")),
+                sanitize_csv_field(g.get("current_progress")),
+                sanitize_csv_field(f"{g.get('progress_percentage', 0.0)}%"),
+                sanitize_csv_field(g.get("status")),
+                sanitize_csv_field(g.get("end_date") or "Ongoing"),
+                sanitize_csv_field(ms.get("type") or "None"),
+                sanitize_csv_field(ms.get("period") or "None")
+            ])
+
+    elif export_type == "report":
+        rep_type = request.args.get('report_type', 'weekly').lower().strip()
+        if rep_type not in ["daily", "weekly", "monthly"]:
+            return jsonify({"error": f"Invalid report_type '{rep_type}'. Supported: daily, weekly, monthly"}), 400
+        report = generate_progress_report(report_type=rep_type, target_date_str=ref_date_str, db=db)
+        rep_name = report.get("report_type", "weekly")
+        filename = f"streaklab_report_{rep_name}_{ref_date_str}.csv"
+        headers = [
+            "Report Type", "Start Date", "End Date", "Generated At",
+            "Habit ID", "Habit Name", "Category", "Time of Day",
+            "Completed", "Missed", "Skipped", "Completion Rate",
+            "Current Streak", "Best Streak", "Status"
+        ]
+        writer.writerow(headers)
+
+        period = report.get("period", {})
+        gen_at = report.get("generated_at", "")
+        for h in report.get("habits", []):
+            writer.writerow([
+                sanitize_csv_field(report.get("report_type")),
+                sanitize_csv_field(period.get("start_date")),
+                sanitize_csv_field(period.get("end_date")),
+                sanitize_csv_field(gen_at),
+                sanitize_csv_field(h.get("id")),
+                sanitize_csv_field(h.get("name")),
+                sanitize_csv_field(h.get("category")),
+                sanitize_csv_field(h.get("time_of_day")),
+                sanitize_csv_field(h.get("completed")),
+                sanitize_csv_field(h.get("missed")),
+                sanitize_csv_field(h.get("skipped")),
+                sanitize_csv_field(f"{h.get('completion_rate', 0.0)}%"),
+                sanitize_csv_field(h.get("current_streak")),
+                sanitize_csv_field(h.get("best_streak")),
+                sanitize_csv_field(h.get("status"))
+            ])
+
+    elif export_type == "habits":
+        filename = f"streaklab_habits_{ref_date_str}.csv"
+        headers = [
+            "Habit ID", "Name", "Description", "Category", "Time of Day", "Target Time",
+            "Target Frequency", "Current Streak", "Best Streak", "Reminder", "Status", "Created At"
+        ]
+        writer.writerow(headers)
+
+        cursor = db.execute("""
+            SELECT h.*, r.reminder_time, r.enabled as reminder_enabled
+            FROM habits h
+            LEFT JOIN habit_reminders r ON h.id = r.habit_id
+            ORDER BY h.id ASC
+        """)
+        for row in cursor.fetchall():
+            hid = row["id"]
+            cur_s = calculate_current_streak(hid, parse_target_date(ref_date_str), db)
+            best_s = calculate_best_streak(hid, parse_target_date(ref_date_str), db)
+            rem_str = f"{row['reminder_time']} (Active)" if row['reminder_enabled'] else ("Off" if row['reminder_time'] else "None")
+
+            writer.writerow([
+                sanitize_csv_field(row["id"]),
+                sanitize_csv_field(row["name"]),
+                sanitize_csv_field(row["description"] or ""),
+                sanitize_csv_field(row["category"] or "General"),
+                sanitize_csv_field(row["time_of_day"] or "Morning"),
+                sanitize_csv_field(row["target_time"] or ""),
+                sanitize_csv_field(row["target_frequency"] or "daily"),
+                sanitize_csv_field(cur_s),
+                sanitize_csv_field(best_s),
+                sanitize_csv_field(rem_str),
+                sanitize_csv_field("Active" if row["active"] == 1 else "Archived"),
+                sanitize_csv_field(row["created_at"])
+            ])
+
+    csv_data = output.getvalue().encode('utf-8-sig')
+    return Response(
+        csv_data,
+        mimetype="text/csv",
+        headers={
+            "Content-Disposition": f"attachment; filename=\"{filename}\"",
+            "Cache-Control": "no-cache"
+        }
+    )
 
 
 @app.route('/api/milestones/acknowledge', methods=['POST'])
