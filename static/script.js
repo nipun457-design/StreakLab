@@ -2848,11 +2848,21 @@ function setupPhase8EventListeners() {
     });
   }
 
-  // Request browser permission button in Settings Modal (strict user action requirement)
-  const btnRequestPerm = document.getElementById("btnRequestBrowserPermission");
-  if (btnRequestPerm) {
-    btnRequestPerm.addEventListener("click", () => {
+  // Request browser permission buttons across Settings view and Reminders Modal
+  const btnRequestPerms = document.querySelectorAll(".btn-request-browser-permission, #btnRequestBrowserPermission, #btnModalRequestBrowserPermission");
+  btnRequestPerms.forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
       requestBrowserNotificationPermission();
+    });
+  });
+
+  // Reminders Modal lifecycle: refresh permission UI & reminder lists whenever shown
+  const notifModal = document.getElementById("notificationSettingsModal");
+  if (notifModal) {
+    notifModal.addEventListener("show.bs.modal", () => {
+      updateNotificationPermissionUI();
+      loadRemindersList();
     });
   }
 
@@ -2879,79 +2889,249 @@ function setupPhase8EventListeners() {
 }
 
 /**
- * Updates UI permission badges and buttons based on browser Notifications API status.
+ * Updates UI permission badges, icons, descriptions, and action buttons across both
+ * the Settings view and the Reminders modal based on browser Notifications API status.
+ *
+ * Supported states:
+ * - "checking": Permission request or status check in progress
+ * - "granted": Notifications allowed by user
+ * - "denied": Notifications blocked in browser settings
+ * - "unsupported": Notifications API missing from browser context
+ * - "default": Permission not requested yet
  */
-function updateNotificationPermissionUI() {
-  const badge = document.getElementById("notificationPermissionBadge");
-  const icon = document.getElementById("notificationStatusIcon");
-  const iconBox = document.getElementById("notificationStatusIconBox");
-  const desc = document.getElementById("notificationPermissionDesc");
-  const reqBtn = document.getElementById("btnRequestBrowserPermission");
-  const navBellIcon = document.getElementById("navBellIcon");
+function updateNotificationPermissionUI(overrideState = null) {
+  const badges = document.querySelectorAll(".notification-permission-badge, #notificationPermissionBadge, #modalNotificationPermissionBadge");
+  const icons = document.querySelectorAll(".notification-status-icon, #notificationStatusIcon, #modalNotificationStatusIcon");
+  const iconBoxes = document.querySelectorAll(".notification-status-icon-box, #notificationStatusIconBox, #modalNotificationStatusIconBox");
+  const descs = document.querySelectorAll(".notification-permission-desc, #notificationPermissionDesc, #modalNotificationPermissionDesc");
+  const reqBtns = document.querySelectorAll(".btn-request-browser-permission, #btnRequestBrowserPermission, #btnModalRequestBrowserPermission");
+  const navBellIcons = document.querySelectorAll("#navBellIcon, .nav-bell-icon");
 
-  if (!("Notification" in window)) {
-    if (badge) { badge.textContent = "Unsupported"; badge.className = "badge bg-secondary rounded-pill small"; }
-    if (desc) desc.textContent = "Your current browser context does not support the Web Notifications API. StreakLab will automatically use in-app companion alert banners.";
-    if (reqBtn) { reqBtn.disabled = true; reqBtn.textContent = "Unsupported in Browser"; }
-    if (navBellIcon) navBellIcon.className = "bi bi-bell-slash text-muted";
+  let state = overrideState;
+  if (!state) {
+    if (!("Notification" in window)) {
+      state = "unsupported";
+    } else {
+      try {
+        state = Notification.permission || "default";
+      } catch (e) {
+        console.warn("Could not read Notification.permission:", e);
+        state = "default";
+      }
+    }
+  }
+
+  if (state === "checking") {
+    badges.forEach(badge => {
+      badge.textContent = "Checking...";
+      badge.className = "badge bg-secondary rounded-pill small notification-permission-badge";
+    });
+    icons.forEach(icon => {
+      icon.className = "bi bi-arrow-repeat text-primary notification-status-icon";
+    });
+    iconBoxes.forEach(box => {
+      box.className = "metric-icon-box bg-light border notification-status-icon-box";
+    });
+    descs.forEach(desc => {
+      desc.textContent = "Requesting notification permission from your browser...";
+    });
+    reqBtns.forEach(btn => {
+      btn.disabled = true;
+      btn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>Requesting...`;
+      btn.className = "btn btn-sm btn-secondary rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission";
+    });
+    navBellIcons.forEach(bell => {
+      bell.className = "bi bi-bell text-warning";
+    });
     return;
   }
 
-  const permission = Notification.permission;
-
-  if (permission === "granted") {
-    if (badge) { badge.textContent = "Granted"; badge.className = "badge bg-success rounded-pill small"; }
-    if (icon) icon.className = "bi bi-bell-fill text-success";
-    if (iconBox) iconBox.className = "metric-icon-box bg-emerald-subtle text-emerald border-0";
-    if (desc) desc.textContent = "Notifications are enabled! You will receive timely alerts when scheduled reminders occur while this site is open.";
-    if (reqBtn) { reqBtn.disabled = true; reqBtn.innerHTML = `<i class="bi bi-check-circle-fill me-1"></i>Notifications Enabled`; reqBtn.className = "btn btn-sm btn-success rounded-pill px-3 py-2 flex-shrink-0"; }
-    if (navBellIcon) navBellIcon.className = "bi bi-bell-fill text-success";
-  } else if (permission === "denied") {
-    if (badge) { badge.textContent = "Denied / Blocked"; badge.className = "badge bg-danger rounded-pill small"; }
-    if (icon) icon.className = "bi bi-bell-slash-fill text-danger";
-    if (iconBox) iconBox.className = "metric-icon-box bg-rose-subtle text-danger border-0";
-    if (desc) desc.textContent = "Browser notifications are blocked in your browser site settings. StreakLab will display useful in-app companion alerts on your dashboard.";
-    if (reqBtn) { reqBtn.disabled = true; reqBtn.innerHTML = `<i class="bi bi-lock-fill me-1"></i>Blocked in Browser`; reqBtn.className = "btn btn-sm btn-outline-danger rounded-pill px-3 py-2 flex-shrink-0"; }
-    if (navBellIcon) navBellIcon.className = "bi bi-bell-slash-fill text-danger";
-  } else {
-    // 'default' (not requested yet)
-    if (badge) { badge.textContent = "Not Requested Yet"; badge.className = "badge bg-warning text-dark rounded-pill small"; }
-    if (icon) icon.className = "bi bi-bell text-warning";
-    if (iconBox) iconBox.className = "metric-icon-box bg-orange-subtle text-orange border-0";
-    if (desc) desc.textContent = "Enable notifications to receive timely system popups when it's time to check in on your habits.";
-    if (reqBtn) { reqBtn.disabled = false; reqBtn.innerHTML = `<i class="bi bi-bell-fill me-1"></i>Enable Notifications`; reqBtn.className = "btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0"; }
-    if (navBellIcon) navBellIcon.className = "bi bi-bell text-warning";
+  if (state === "unsupported") {
+    badges.forEach(badge => {
+      badge.textContent = "Unsupported";
+      badge.className = "badge bg-secondary rounded-pill small notification-permission-badge";
+    });
+    icons.forEach(icon => {
+      icon.className = "bi bi-bell-slash text-muted notification-status-icon";
+    });
+    iconBoxes.forEach(box => {
+      box.className = "metric-icon-box bg-light text-muted border notification-status-icon-box";
+    });
+    descs.forEach(desc => {
+      desc.textContent = "Your current browser context does not support the Web Notifications API. StreakLab will automatically use in-app companion alert banners.";
+    });
+    reqBtns.forEach(btn => {
+      btn.disabled = true;
+      btn.innerHTML = `<i class="bi bi-x-circle me-1"></i>Unsupported in Browser`;
+      btn.className = "btn btn-sm btn-secondary rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission";
+    });
+    navBellIcons.forEach(bell => {
+      bell.className = "bi bi-bell-slash text-muted";
+    });
+    return;
   }
+
+  if (state === "granted") {
+    badges.forEach(badge => {
+      badge.textContent = "Granted";
+      badge.className = "badge bg-success rounded-pill small notification-permission-badge";
+    });
+    icons.forEach(icon => {
+      icon.className = "bi bi-bell-fill text-success notification-status-icon";
+    });
+    iconBoxes.forEach(box => {
+      box.className = "metric-icon-box bg-emerald-subtle text-emerald border-0 notification-status-icon-box";
+    });
+    descs.forEach(desc => {
+      desc.textContent = "Notifications are enabled! You will receive timely alerts when scheduled reminders occur while this site is open.";
+    });
+    reqBtns.forEach(btn => {
+      btn.disabled = true;
+      btn.innerHTML = `<i class="bi bi-check-circle-fill me-1"></i>Notifications Enabled`;
+      btn.className = "btn btn-sm btn-success rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission";
+    });
+    navBellIcons.forEach(bell => {
+      bell.className = "bi bi-bell-fill text-success";
+    });
+    return;
+  }
+
+  if (state === "denied") {
+    badges.forEach(badge => {
+      badge.textContent = "Denied / Blocked";
+      badge.className = "badge bg-danger rounded-pill small notification-permission-badge";
+    });
+    icons.forEach(icon => {
+      icon.className = "bi bi-bell-slash-fill text-danger notification-status-icon";
+    });
+    iconBoxes.forEach(box => {
+      box.className = "metric-icon-box bg-rose-subtle text-danger border-0 notification-status-icon-box";
+    });
+    descs.forEach(desc => {
+      desc.textContent = "Browser notifications are blocked in your browser site settings. StreakLab will display useful in-app companion alerts on your dashboard.";
+    });
+    reqBtns.forEach(btn => {
+      btn.disabled = true;
+      btn.innerHTML = `<i class="bi bi-lock-fill me-1"></i>Blocked in Browser`;
+      btn.className = "btn btn-sm btn-outline-danger rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission";
+    });
+    navBellIcons.forEach(bell => {
+      bell.className = "bi bi-bell-slash-fill text-danger";
+    });
+    return;
+  }
+
+  // State: "default" (Not Requested Yet) or error fallback
+  badges.forEach(badge => {
+    badge.textContent = "Not Requested Yet";
+    badge.className = "badge bg-warning text-dark rounded-pill small notification-permission-badge";
+  });
+  icons.forEach(icon => {
+    icon.className = "bi bi-bell text-warning notification-status-icon";
+  });
+  iconBoxes.forEach(box => {
+    box.className = "metric-icon-box bg-orange-subtle text-orange border-0 notification-status-icon-box";
+  });
+  descs.forEach(desc => {
+    desc.textContent = "Enable notifications to receive timely system popups when it's time to check in on your habits.";
+  });
+  reqBtns.forEach(btn => {
+    btn.disabled = false;
+    btn.innerHTML = `<i class="bi bi-bell-fill me-1"></i>Enable Notifications`;
+    btn.className = "btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission";
+  });
+  navBellIcons.forEach(bell => {
+    bell.className = "bi bi-bell text-warning";
+  });
+}
+
+/**
+ * Checks and updates notification permission state (alias for backward compatibility).
+ */
+function checkNotificationPermissionState() {
+  updateNotificationPermissionUI();
 }
 
 /**
  * Requests browser notification permission strictly upon user interaction.
+ * Handles both modern Promise-based and legacy callback-based Notification APIs,
+ * gracefully catches rejected promises and browser errors, and immediately updates UI.
  */
 async function requestBrowserNotificationPermission() {
   if (!("Notification" in window)) {
+    updateNotificationPermissionUI("unsupported");
     showToast("Web Notifications are unsupported in this browser environment.", "warning");
     return;
   }
 
+  // If already granted or denied, update UI and avoid repeated redundant prompts
+  let currentPerm = "default";
   try {
-    const result = await Notification.requestPermission();
-    updateNotificationPermissionUI();
+    currentPerm = Notification.permission || "default";
+  } catch (e) {
+    currentPerm = "default";
+  }
 
-    if (result === "granted") {
-      showToast("Browser notifications enabled! 🔔", "success");
-      try {
-        new Notification("StreakLab Reminders Active", {
-          body: "Scheduled reminders will notify you when habits are due.",
-          icon: "/static/favicon.ico"
-        });
-      } catch (e) {
-        console.warn("Test notification notice:", e);
-      }
-    } else if (result === "denied") {
-      showToast("Notifications were denied. In-app dashboard banners will be used instead.", "info");
+  if (currentPerm === "granted") {
+    updateNotificationPermissionUI("granted");
+    showToast("Browser notifications are already enabled! 🔔", "success");
+    return;
+  }
+  if (currentPerm === "denied") {
+    updateNotificationPermissionUI("denied");
+    showToast("Notifications are blocked in your browser site settings. In-app alerts will be used.", "info");
+    return;
+  }
+
+  // Set intermediate checking/requesting state immediately
+  updateNotificationPermissionUI("checking");
+
+  let result = "default";
+  try {
+    // Request permission (support both Promise-based and legacy callback syntax)
+    let permissionPromise;
+    try {
+      permissionPromise = Notification.requestPermission();
+    } catch (callErr) {
+      // Some older browser engines threw if called without callback
+      permissionPromise = null;
+    }
+
+    if (permissionPromise && typeof permissionPromise.then === "function") {
+      result = await permissionPromise;
+    } else {
+      result = await new Promise(resolve => {
+        try {
+          Notification.requestPermission(res => resolve(res || Notification.permission || "default"));
+        } catch (innerErr) {
+          console.warn("Legacy requestPermission callback threw:", innerErr);
+          resolve(Notification.permission || "default");
+        }
+      });
     }
   } catch (err) {
-    console.error("Failed to request notification permission:", err);
+    console.warn("Notification.requestPermission rejected or failed:", err);
+    // In case of error/rejection, safely fall back to current browser property
+    result = (typeof Notification !== "undefined" && Notification.permission) ? Notification.permission : "default";
+  } finally {
+    // Ensure UI is immediately updated to the resolved permission state (never stuck on checking)
+    updateNotificationPermissionUI(result);
+  }
+
+  if (result === "granted") {
+    showToast("Browser notifications enabled! 🔔", "success");
+    try {
+      new Notification("StreakLab Reminders Active", {
+        body: "Scheduled reminders will notify you when habits are due while this site is open.",
+        icon: "/static/favicon.ico"
+      });
+    } catch (e) {
+      console.warn("Could not dispatch welcome notification:", e);
+    }
+  } else if (result === "denied") {
+    showToast("Notifications were blocked. In-app dashboard banners will be used instead.", "info");
+  } else {
+    showToast("Notification permission was not granted. In-app alerts remain active.", "secondary");
   }
 }
 
@@ -2959,8 +3139,8 @@ async function requestBrowserNotificationPermission() {
  * Loads all configured habit reminders from /api/reminders.
  */
 async function loadRemindersList() {
-  const container = document.getElementById("settingsRemindersList");
-  const countLabel = document.getElementById("activeRemindersCountLabel");
+  const containers = document.querySelectorAll(".settings-reminders-list, #settingsRemindersList, #modalSettingsRemindersList");
+  const countLabels = document.querySelectorAll(".active-reminders-count-label, #activeRemindersCountLabel, #modalActiveRemindersCountLabel");
 
   try {
     const res = await fetch("/api/reminders");
@@ -2970,11 +3150,11 @@ async function loadRemindersList() {
     configuredReminders = Array.isArray(data) ? data : [];
 
     const activeCount = configuredReminders.filter(r => r.enabled).length;
-    if (countLabel) {
-      countLabel.textContent = `${activeCount} active reminder${activeCount === 1 ? '' : 's'}`;
-    }
+    countLabels.forEach(lbl => {
+      lbl.textContent = `${activeCount} active reminder${activeCount === 1 ? '' : 's'}`;
+    });
 
-    if (container) {
+    containers.forEach(container => {
       if (configuredReminders.length === 0) {
         container.innerHTML = `
           <div class="text-center py-4 text-muted small bg-white rounded-3 border">
@@ -3000,7 +3180,7 @@ async function loadRemindersList() {
           </div>
         `).join("");
       }
-    }
+    });
 
   } catch (err) {
     console.error("Failed to load reminders:", err);

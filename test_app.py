@@ -2039,6 +2039,182 @@ class StreakLabTestCase(unittest.TestCase):
         rep_reply = res_rep.get_json().get("reply", "")
         self.assertIn("CSV", rep_reply)
 
+    # -----------------------------------------------------------------------
+    # 13. BROWSER NOTIFICATION PERMISSION TESTS (GRANTED, DENIED, UNSUPPORTED, ERROR)
+    # -----------------------------------------------------------------------
+    def test_notification_permission_dom_elements_and_unique_ids(self):
+        """Templates have unique IDs and shared classes for Settings and Reminders Modal."""
+        res = self.client.get('/')
+        self.assertEqual(res.status_code, 200)
+        html = res.data.decode('utf-8')
+
+        # Verify no duplicate IDs exist in the rendered HTML
+        import re
+        from collections import Counter
+        ids = re.findall(r'id=["\']([^"\']+)["\']', html)
+        duplicates = {k: v for k, v in Counter(ids).items() if v > 1}
+        self.assertEqual(duplicates, {}, f"Found duplicate IDs in HTML: {duplicates}")
+
+        # Verify unique IDs in Settings view and Reminders modal
+        self.assertIn('id="notificationPermissionBadge"', html)
+        self.assertIn('id="modalNotificationPermissionBadge"', html)
+        self.assertIn('id="btnRequestBrowserPermission"', html)
+        self.assertIn('id="btnModalRequestBrowserPermission"', html)
+        self.assertIn('id="settingsRemindersList"', html)
+        self.assertIn('id="modalSettingsRemindersList"', html)
+
+        # Verify shared semantic classes
+        self.assertIn('notification-permission-badge', html)
+        self.assertIn('btn-request-browser-permission', html)
+        self.assertIn('settings-reminders-list', html)
+
+    def test_notification_permission_js_logic_supported_states(self):
+        """static/script.js implements all required states: checking, granted, denied, unsupported, default."""
+        with open('static/script.js', 'r', encoding='utf-8') as f:
+            js = f.read()
+
+        # Check state transitions in updateNotificationPermissionUI
+        self.assertIn('state === "checking"', js)
+        self.assertIn('state === "unsupported"', js)
+        self.assertIn('state === "granted"', js)
+        self.assertIn('state === "denied"', js)
+        self.assertIn('Not Requested Yet', js)
+        self.assertIn('Unsupported in Browser', js)
+        self.assertIn('Blocked in Browser', js)
+        self.assertIn('Notifications Enabled', js)
+        self.assertIn('Requesting...', js)
+
+        # Check try/catch and finally block ensuring UI is never stuck on checking
+        self.assertIn('finally {', js)
+        self.assertIn('updateNotificationPermissionUI(result);', js)
+
+    def test_notification_permission_request_strictly_on_user_interaction(self):
+        """Notification permission is requested only on user action and handles already decided states."""
+        with open('static/script.js', 'r', encoding='utf-8') as f:
+            js = f.read()
+
+        # Initialization checks status only without prompting
+        self.assertIn('updateNotificationPermissionUI();', js)
+        self.assertNotIn('requestBrowserNotificationPermission();', js[:js.find('function setupPhase8EventListeners')])
+
+        # requestBrowserNotificationPermission checks if already decided
+        self.assertIn('if (currentPerm === "granted")', js)
+        self.assertIn('if (currentPerm === "denied")', js)
+
+        # Event listener handles both buttons
+        self.assertIn('btnRequestPerms.forEach', js)
+
+    def test_notification_site_closed_tab_activity_disclaimer(self):
+        """Documentation and UI state that notifications require active tab without false background claims."""
+        res = self.client.get('/')
+        html = res.data.decode('utf-8')
+
+        # Clarifies tab activity requirement honestly
+        self.assertIn('Tab Activity:', html)
+        self.assertIn('require StreakLab to be open or active in a browser tab', html)
+        self.assertNotIn('works when browser is closed', html.lower())
+
+    # -----------------------------------------------------------------------
+    # 14. VERCEL DEPLOYMENT & SERVERLESS CONFIGURATION TESTS
+    # -----------------------------------------------------------------------
+    def test_vercel_configuration_and_serverless_sqlite(self):
+        """Verify vercel.json routing, WSGI entry point, and serverless /tmp fallback."""
+        import json
+        import app as app_module
+
+        # 1. WSGI callable compatibility
+        self.assertTrue(hasattr(app_module, 'app'))
+        self.assertTrue(hasattr(app_module, 'application'))
+        self.assertEqual(app_module.app, app_module.application)
+
+        # 2. vercel.json configuration
+        self.assertTrue(os.path.exists('vercel.json'), "vercel.json must exist in root")
+        with open('vercel.json', 'r', encoding='utf-8') as f:
+            v_cfg = json.load(f)
+        self.assertEqual(v_cfg.get('version'), 2)
+        self.assertTrue(any(b.get('src') == 'app.py' and b.get('use') == '@vercel/python' for b in v_cfg.get('builds', [])))
+        self.assertTrue(any(r.get('dest') == 'app.py' for r in v_cfg.get('routes', [])))
+
+        # 3. Serverless database path resolution
+        orig_vercel = os.environ.get('VERCEL')
+        orig_db_cfg = app.config.get('DATABASE')
+        try:
+            os.environ['VERCEL'] = '1'
+            app.config.pop('DATABASE', None)
+            db_path = app_module.get_database_path()
+            self.assertEqual(db_path, '/tmp/streaklab.db')
+        finally:
+            if orig_vercel is None:
+                os.environ.pop('VERCEL', None)
+            else:
+                os.environ['VERCEL'] = orig_vercel
+            if orig_db_cfg is not None:
+                app.config['DATABASE'] = orig_db_cfg
+
+    def test_vercel_regression_read_only_task_instance_never_written(self):
+        """Regression test: init_db on Vercel strictly uses /tmp and never touches /var/task/instance."""
+        import app as app_module
+
+        created_dirs = []
+        real_makedirs = os.makedirs
+
+        def tracked_makedirs(path, *args, **kwargs):
+            norm_path = os.path.normpath(str(path)).replace('\\', '/')
+            if '/var/task' in norm_path:
+                raise OSError(30, "Read-only file system", str(path))
+            created_dirs.append(norm_path)
+            # Call real makedirs only for valid non-var paths
+            return real_makedirs(path, *args, **kwargs)
+
+        # Simulate Vercel environment
+        orig_env = {k: os.environ.get(k) for k in ['VERCEL', 'VERCEL_ENV', 'AWS_LAMBDA_FUNCTION_NAME', 'DATABASE']}
+        orig_instance_path = app.instance_path
+        orig_db_cfg = app.config.get('DATABASE')
+
+        try:
+            os.environ['VERCEL'] = '1'
+            os.environ.pop('DATABASE', None)
+            app.config.pop('DATABASE', None)
+            app.instance_path = '/var/task/instance'
+
+            # 1. Path must resolve to /tmp/streaklab.db BEFORE any directory creation
+            resolved_path = app_module.get_database_path()
+            self.assertEqual(resolved_path, '/tmp/streaklab.db')
+            self.assertEqual(app.config['DATABASE'], '/tmp/streaklab.db')
+
+            # 2. init_db must never attempt to create /var/task/instance
+            with patch('os.makedirs', side_effect=tracked_makedirs):
+                with app.app_context():
+                    app_module.init_db()
+
+            # Ensure /var/task was never in created dirs
+            for d in created_dirs:
+                self.assertNotIn('/var/task', d)
+
+            # 3. get_db must use the exact same /tmp/streaklab.db path and have initialized tables
+            with patch('os.makedirs', side_effect=tracked_makedirs):
+                with app.app_context():
+                    db = app_module.get_db()
+                    cursor = db.execute("SELECT count(*) FROM habits")
+                    self.assertIsNotNone(cursor.fetchone())
+
+        finally:
+            # Restore original environment and configs
+            for k, v in orig_env.items():
+                if v is None:
+                    os.environ.pop(k, None)
+                else:
+                    os.environ[k] = v
+            app.instance_path = orig_instance_path
+            if orig_db_cfg is not None:
+                app.config['DATABASE'] = orig_db_cfg
+            # Clean up /tmp/streaklab.db if created
+            if os.path.exists('/tmp/streaklab.db'):
+                try:
+                    os.remove('/tmp/streaklab.db')
+                except Exception:
+                    pass
+
 
 if __name__ == '__main__':
     unittest.main()

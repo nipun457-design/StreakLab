@@ -737,20 +737,20 @@
               <div class="card border-0 bg-light rounded-3 p-3 mb-4">
                 <div class="d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-3">
                   <div class="d-flex align-items-center gap-3">
-                    <div class="metric-icon-box bg-white border" id="notificationStatusIconBox">
-                      <i class="bi bi-bell text-muted" id="notificationStatusIcon"></i>
+                    <div class="metric-icon-box bg-white border notification-status-icon-box" id="notificationStatusIconBox">
+                      <i class="bi bi-bell text-muted notification-status-icon" id="notificationStatusIcon"></i>
                     </div>
                     <div>
                       <div class="d-flex align-items-center gap-2 mb-1">
                         <strong class="text-dark small">Browser Notification Permission</strong>
-                        <span class="badge bg-secondary rounded-pill small" id="notificationPermissionBadge">Checking...</span>
+                        <span class="badge bg-secondary rounded-pill small notification-permission-badge" id="notificationPermissionBadge">Checking...</span>
                       </div>
-                      <p class="text-muted fs-xxs mb-0" id="notificationPermissionDesc">
+                      <p class="text-muted fs-xxs mb-0 notification-permission-desc" id="notificationPermissionDesc">
                         Browser notifications alert you at scheduled habit times.
                       </p>
                     </div>
                   </div>
-                  <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0" id="btnRequestBrowserPermission">
+                  <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission" id="btnRequestBrowserPermission">
                     <i class="bi bi-bell-fill me-1"></i>Enable Notifications
                   </button>
                 </div>
@@ -776,9 +776,9 @@
               <div>
                 <div class="d-flex align-items-center justify-content-between mb-2">
                   <strong class="text-dark small">Configured Habit Reminders</strong>
-                  <small class="text-muted" id="activeRemindersCountLabel">0 active reminders</small>
+                  <small class="text-muted active-reminders-count-label" id="activeRemindersCountLabel">0 active reminders</small>
                 </div>
-                <div id="settingsRemindersList" class="d-flex flex-column gap-2">
+                <div id="settingsRemindersList" class="d-flex flex-column gap-2 settings-reminders-list">
                   <!-- Rendered dynamically -->
                 </div>
               </div>
@@ -1207,20 +1207,20 @@
           <div class="card border-0 bg-light rounded-3 p-3 mb-4">
             <div class="d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-3">
               <div class="d-flex align-items-center gap-3">
-                <div class="metric-icon-box bg-white border" id="notificationStatusIconBox">
-                  <i class="bi bi-bell text-muted" id="notificationStatusIcon"></i>
+                <div class="metric-icon-box bg-white border notification-status-icon-box" id="modalNotificationStatusIconBox">
+                  <i class="bi bi-bell text-muted notification-status-icon" id="modalNotificationStatusIcon"></i>
                 </div>
                 <div>
                   <div class="d-flex align-items-center gap-2 mb-1">
                     <strong class="text-dark small">Browser Notification Permission</strong>
-                    <span class="badge bg-secondary rounded-pill small" id="notificationPermissionBadge">Checking...</span>
+                    <span class="badge bg-secondary rounded-pill small notification-permission-badge" id="modalNotificationPermissionBadge">Checking...</span>
                   </div>
-                  <p class="text-muted fs-xxs mb-0" id="notificationPermissionDesc">
+                  <p class="text-muted fs-xxs mb-0 notification-permission-desc" id="modalNotificationPermissionDesc">
                     Browser notifications allow StreakLab to alert you at scheduled habit times.
                   </p>
                 </div>
               </div>
-              <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0" id="btnRequestBrowserPermission">
+              <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission" id="btnModalRequestBrowserPermission">
                 <i class="bi bi-bell-fill me-1"></i>Enable Notifications
               </button>
             </div>
@@ -1230,9 +1230,9 @@
           <div>
             <div class="d-flex align-items-center justify-content-between mb-2">
               <strong class="text-dark small">Configured Habit Reminders</strong>
-              <small class="text-muted" id="activeRemindersCountLabel">0 active reminders</small>
+              <small class="text-muted active-reminders-count-label" id="modalActiveRemindersCountLabel">0 active reminders</small>
             </div>
-            <div id="settingsRemindersList" class="d-flex flex-column gap-2">
+            <div id="modalSettingsRemindersList" class="d-flex flex-column gap-2 settings-reminders-list">
               <!-- Rendered dynamically -->
             </div>
           </div>

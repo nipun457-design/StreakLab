@@ -37,10 +37,49 @@ import ai_explainer
 logger = logging.getLogger("streaklab.app")
 
 # Initialize Flask application
+# Initialize Flask application
 app = Flask(__name__, template_folder='templates', static_folder='static')
+application = app  # WSGI compatibility for Vercel / serverless runtimes
 
-# Set database path inside Flask's instance directory (git-ignored)
-app.config.setdefault('DATABASE', os.path.join(app.instance_path, 'streaklab.db'))
+
+def get_database_path():
+    """
+    Resolves and configures the SQLite database path.
+    1. If DATABASE environment variable is set, it takes top precedence.
+    2. If running on Vercel or any serverless runtime (VERCEL, AWS_LAMBDA, LAMBDA_TASK_ROOT, or /var/task),
+       strictly uses '/tmp/streaklab.db' BEFORE attempting any directory creation or SQLite connection.
+    3. In local development, uses Flask's instance directory 'instance/streaklab.db'.
+    """
+    env_db = os.environ.get('DATABASE')
+    if env_db:
+        return env_db
+
+    # Serverless runtime detection (Vercel, AWS Lambda, or /var/task deployment root)
+    is_serverless = bool(
+        os.environ.get('VERCEL')
+        or os.environ.get('VERCEL_ENV')
+        or os.environ.get('VERCEL_REGION')
+        or os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
+        or os.environ.get('LAMBDA_TASK_ROOT')
+        or os.environ.get('NOW_REGION')
+        or (hasattr(app, 'instance_path') and str(app.instance_path).startswith('/var/task'))
+        or (hasattr(app, 'root_path') and str(app.root_path).startswith('/var/task'))
+    )
+    if is_serverless:
+        resolved = '/tmp/streaklab.db'
+        app.config['DATABASE'] = resolved
+        return resolved
+
+    # Local development: use instance/streaklab.db without premature creation
+    resolved = os.path.join(app.instance_path, 'streaklab.db')
+    app.config['DATABASE'] = resolved
+    return resolved
+
+
+get_default_database_path = get_database_path
+
+# Set database path inside Flask's configuration
+app.config.setdefault('DATABASE', get_database_path())
 
 
 # ---------------------------------------------------------------------------
@@ -52,12 +91,21 @@ def get_db():
     Opens a unique database connection per request if not already open,
     attaching it to Flask's request-scoped 'g' context.
     Enforces SQLite foreign key constraints and enables dict-like row access.
+    Uses the exact same resolved database path as init_db().
     """
     if 'db' not in g:
-        db_path = app.config['DATABASE']
-        # Ensure instance directory exists if using a file path
+        db_path = app.config.get('DATABASE') or get_database_path()
+        app.config['DATABASE'] = db_path
+
         if db_path != ':memory:':
-            os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+            db_dir = os.path.dirname(os.path.abspath(db_path))
+            if db_dir:
+                try:
+                    os.makedirs(db_dir, exist_ok=True)
+                except (OSError, PermissionError):
+                    db_path = '/tmp/streaklab.db'
+                    app.config['DATABASE'] = db_path
+                    os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 
         g.db = sqlite3.connect(db_path)
         g.db.row_factory = sqlite3.Row
@@ -78,10 +126,20 @@ def init_db():
     """
     Creates tables and indices in SQLite if they do not already exist.
     Called automatically on application startup.
+    Ensures both init_db() and all runtime queries use the same resolved database path.
     """
-    db_path = app.config['DATABASE']
+    db_path = app.config.get('DATABASE') or get_database_path()
+    app.config['DATABASE'] = db_path
+
     if db_path != ':memory:':
-        os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
+        db_dir = os.path.dirname(os.path.abspath(db_path))
+        if db_dir:
+            try:
+                os.makedirs(db_dir, exist_ok=True)
+            except (OSError, PermissionError):
+                db_path = '/tmp/streaklab.db'
+                app.config['DATABASE'] = db_path
+                os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
 
     conn = sqlite3.connect(db_path)
     conn.execute("PRAGMA foreign_keys = ON;")
