@@ -59,6 +59,9 @@ const CATEGORY_CONFIG = {
 // 2. INITIALIZATION ON DOM READY
 // ----------------------------------------------------------------------------
 document.addEventListener("DOMContentLoaded", () => {
+  // Step 0: Initialize Theme Manager (Light / Dark / System mode persistence)
+  initTheme();
+
   // Step A: Display formatted local date in top navigation
   displayCurrentDate();
 
@@ -112,7 +115,7 @@ function displayCurrentDate() {
 // ----------------------------------------------------------------------------
 // VIEW ROUTING & NAVIGATION
 // ----------------------------------------------------------------------------
-const VALID_VIEWS = ["dashboard", "habits", "calendar", "goals", "reports", "settings"];
+const VALID_VIEWS = ["dashboard", "overview", "habits", "calendar", "insights", "goals", "reports", "settings"];
 
 /**
  * Initializes single-page application navigation router and binds history/hash changes.
@@ -132,7 +135,7 @@ function initViewRouter() {
 
   // 2. Listen for URL hash changes (e.g. back/forward buttons or direct hash links)
   window.addEventListener("hashchange", () => {
-    const hash = window.location.hash ? window.location.hash.substring(1) : "dashboard";
+    const hash = window.location.hash ? window.location.hash.substring(1) : "overview";
     switchView(hash, false);
   });
 
@@ -145,7 +148,7 @@ function initViewRouter() {
   }
 
   // 4. Determine initial view from URL hash on boot
-  const initialHash = window.location.hash ? window.location.hash.substring(1) : "dashboard";
+  const initialHash = window.location.hash ? window.location.hash.substring(1) : "overview";
   switchView(initialHash, false);
 }
 
@@ -154,14 +157,16 @@ function initViewRouter() {
  */
 function switchView(viewName, updateHash = true) {
   if (!VALID_VIEWS.includes(viewName)) {
-    viewName = "dashboard";
+    viewName = "overview";
   }
+
+  const targetView = (viewName === "dashboard") ? "overview" : viewName;
 
   // Hide all view containers and reveal active view
   VALID_VIEWS.forEach(v => {
     const container = document.getElementById(`view-${v}`);
     if (container) {
-      if (v === viewName) {
+      if (v === targetView) {
         container.classList.remove("d-none");
       } else {
         container.classList.add("d-none");
@@ -172,7 +177,7 @@ function switchView(viewName, updateHash = true) {
   // Update navigation link active states
   document.querySelectorAll(".nav-link[data-view]").forEach(link => {
     const linkView = link.getAttribute("data-view");
-    if (linkView === viewName) {
+    if (linkView === targetView || (linkView === "dashboard" && targetView === "overview") || (linkView === "overview" && targetView === "overview")) {
       link.classList.add("active");
       link.setAttribute("aria-current", "page");
     } else {
@@ -197,29 +202,31 @@ function switchView(viewName, updateHash = true) {
   window.scrollTo({ top: 0, behavior: "instant" });
 
   // View-specific data & rendering triggers
-  if (viewName === "dashboard") {
+  if (targetView === "overview" || targetView === "dashboard") {
     if (weeklyChartInstance && typeof weeklyChartInstance.resize === "function") {
       weeklyChartInstance.resize();
     }
     if (timeOfDayChartInstance && typeof timeOfDayChartInstance.resize === "function") {
       timeOfDayChartInstance.resize();
     }
-  } else if (viewName === "habits") {
+  } else if (targetView === "habits") {
     renderHabits();
-  } else if (viewName === "calendar") {
+  } else if (targetView === "calendar") {
     if (!currentCalendarData) {
       loadCalendarHeatmap();
     }
+  } else if (targetView === "insights") {
+    loadInsightsFromApi(currentInsightsDays);
     if (!currentWeeklyReviewData) {
       loadWeeklyReview();
     }
-  } else if (viewName === "goals") {
+  } else if (targetView === "goals") {
     if (!currentGoals || currentGoals.length === 0) {
       loadGoalsAndMilestones();
     }
-  } else if (viewName === "reports") {
+  } else if (targetView === "reports") {
     loadProgressReport(currentReportType, currentReportDate);
-  } else if (viewName === "settings") {
+  } else if (targetView === "settings") {
     loadRemindersList();
     checkNotificationPermissionState();
   }
@@ -579,6 +586,17 @@ function renderHabits() {
                 <i class="bi bi-pause-fill"></i>
               </button>
 
+              <!-- Edit Habit Button -->
+              <button 
+                type="button" 
+                class="btn btn-sm btn-light border rounded-pill px-2 py-1 ms-1 text-muted" 
+                title="Edit Habit & Reminder" 
+                onclick="openEditHabitModal(${habit.id})"
+                ${disabledAttr}
+                aria-label="Edit ${escapeHtml(habit.name)}">
+                <i class="bi bi-pencil"></i>
+              </button>
+
               <!-- Deactivate Habit Button -->
               <button 
                 type="button" 
@@ -658,6 +676,9 @@ function renderHabitsManagementList(filteredList) {
         </div>
 
         <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+          <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-1" onclick="openEditHabitModal(${habit.id})" title="Edit Habit Details & Reminder">
+            <i class="bi bi-pencil me-1"></i>Edit
+          </button>
           <button type="button" class="btn btn-sm btn-outline-secondary rounded-pill px-3 py-1" onclick="openReminderModal(${habit.id})" title="Configure Reminder">
             <i class="bi bi-bell me-1"></i>Reminder
           </button>
@@ -798,6 +819,7 @@ async function deleteHabit(habitId) {
 
     // Remove from in-memory active habits list
     habits = habits.filter(h => h.id !== habitId);
+    configuredReminders = configuredReminders.filter(r => r.habit_id !== habitId);
 
     showToast(`Habit "${habit.name}" archived successfully.`, "secondary");
     updateSummaryMetrics();
@@ -808,6 +830,7 @@ async function deleteHabit(habitId) {
     loadCalendarHeatmap();
     loadWeeklyReview();
     loadGoalsAndMilestones();
+    loadRemindersList();
 
   } catch (error) {
     console.error("Failed to deactivate habit:", error);
@@ -819,7 +842,7 @@ async function deleteHabit(habitId) {
 }
 
 // ----------------------------------------------------------------------------
-// 6. ADD NEW HABIT FORM SUBMISSION
+// 6. ADD & EDIT HABIT FORM SUBMISSIONS
 // ----------------------------------------------------------------------------
 function setupEventListeners() {
   const addHabitForm = document.getElementById("addHabitForm");
@@ -835,6 +858,7 @@ function setupEventListeners() {
       const timeOfDaySelect = document.getElementById("habitTimeOfDaySelect");
       const frequencySelect = document.getElementById("habitFrequencySelect");
       const targetTimeInput = document.getElementById("habitTargetTimeInput");
+      const reminderToggle = document.getElementById("habitReminderToggle");
       const submitBtn = addHabitForm.querySelector("button[type='submit']");
 
       const name = nameInput ? nameInput.value.trim() : "";
@@ -846,6 +870,7 @@ function setupEventListeners() {
 
       const rawTime = (targetTimeInput && targetTimeInput.value) ? targetTimeInput.value : "08:00";
       const formattedTime = formatTime12h(rawTime);
+      const reminderEnabled = reminderToggle ? reminderToggle.checked : true;
 
       const payload = {
         name: name,
@@ -853,7 +878,9 @@ function setupEventListeners() {
         category: categorySelect ? categorySelect.value : "Coding",
         time_of_day: timeOfDaySelect ? timeOfDaySelect.value : "Morning",
         target_frequency: frequencySelect ? frequencySelect.value : "Daily",
-        target_time: formattedTime
+        target_time: formattedTime,
+        reminder_time: rawTime,
+        reminder_enabled: reminderEnabled
       };
 
       // Set submission lock & loading UI state
@@ -879,16 +906,32 @@ function setupEventListeners() {
 
         // Add newly created habit to local state
         habits.unshift(newHabit);
+        if (newHabit.reminder && newHabit.reminder.enabled) {
+          configuredReminders.push({
+            id: newHabit.reminder.id || newHabit.id,
+            habit_id: newHabit.id,
+            habit_name: newHabit.name,
+            reminder_time: newHabit.reminder.reminder_time,
+            enabled: 1
+          });
+        }
 
         // Reset form & close modal
         addHabitForm.reset();
+        const remToggleReset = document.getElementById("habitReminderToggle");
+        if (remToggleReset) remToggleReset.checked = true;
+
         const modalEl = document.getElementById("addHabitModal");
         if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
           const modalInstance = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
           if (modalInstance) modalInstance.hide();
         }
 
-        showToast(`New habit "${newHabit.name}" created!`, "success");
+        const toastMsg = reminderEnabled
+          ? `New habit "${newHabit.name}" created with daily reminder at ${rawTime}! 🔔`
+          : `New habit "${newHabit.name}" created!`;
+        showToast(toastMsg, "success");
+
         renderHabits();
         updateSummaryMetrics();
         updateCharts();
@@ -898,6 +941,7 @@ function setupEventListeners() {
         loadCalendarHeatmap();
         loadWeeklyReview();
         loadGoalsAndMilestones();
+        loadRemindersList();
 
       } catch (error) {
         console.error("Failed to create habit:", error);
@@ -912,7 +956,104 @@ function setupEventListeners() {
     });
   }
 
-  // Configurable Insights Analysis Window Selector (Phase 3)
+  // Edit Habit Form Submission
+  const editHabitForm = document.getElementById("editHabitForm");
+  if (editHabitForm) {
+    editHabitForm.addEventListener("submit", async (e) => {
+      e.preventDefault();
+
+      const idInput = document.getElementById("editHabitIdInput");
+      const nameInput = document.getElementById("editHabitNameInput");
+      const descInput = document.getElementById("editHabitDescriptionInput");
+      const catSelect = document.getElementById("editHabitCategorySelect");
+      const todSelect = document.getElementById("editHabitTimeOfDaySelect");
+      const freqSelect = document.getElementById("editHabitFrequencySelect");
+      const timeInput = document.getElementById("editHabitTargetTimeInput");
+      const remToggle = document.getElementById("editHabitReminderToggle");
+      const remTimeInput = document.getElementById("editHabitReminderTimeInput");
+      const saveBtn = document.getElementById("btnSaveEditHabit");
+
+      const habitId = idInput ? parseInt(idInput.value, 10) : null;
+      if (!habitId) return;
+
+      const name = nameInput ? nameInput.value.trim() : "";
+      if (!name) {
+        if (nameInput) nameInput.classList.add("is-invalid");
+        return;
+      }
+      if (nameInput) nameInput.classList.remove("is-invalid");
+
+      const rawTime = (timeInput && timeInput.value) ? timeInput.value : "08:00";
+      const formattedTime = formatTime12h(rawTime);
+      const remTime = (remTimeInput && remTimeInput.value) ? remTimeInput.value : rawTime;
+      const remEnabled = remToggle ? remToggle.checked : true;
+
+      const payload = {
+        name: name,
+        description: descInput ? descInput.value.trim() : "",
+        category: catSelect ? catSelect.value : "General",
+        time_of_day: todSelect ? todSelect.value : "Morning",
+        target_frequency: freqSelect ? freqSelect.value : "daily",
+        target_time: formattedTime,
+        reminder_time: remTime,
+        reminder_enabled: remEnabled
+      };
+
+      if (saveBtn) {
+        saveBtn.disabled = true;
+        saveBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-2"></span>Saving...`;
+      }
+
+      try {
+        const response = await fetch(`/api/habits/${habitId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `Server error (${response.status})`);
+        }
+
+        const updatedHabit = await response.json();
+
+        // Update in-memory habits list
+        const idx = habits.findIndex(h => h.id === habitId);
+        if (idx !== -1) {
+          habits[idx] = updatedHabit;
+        }
+
+        // Close modal
+        const modalEl = document.getElementById("editHabitModal");
+        if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
+          const inst = bootstrap.Modal.getInstance(modalEl) || bootstrap.Modal.getOrCreateInstance(modalEl);
+          if (inst) inst.hide();
+        }
+
+        showToast(`Habit "${updatedHabit.name}" updated successfully!`, "success");
+        renderHabits();
+        updateSummaryMetrics();
+        updateCharts();
+        loadInsightsFromApi(currentInsightsDays);
+        loadCalendarHeatmap();
+        loadWeeklyReview();
+        loadGoalsAndMilestones();
+        loadRemindersList();
+
+      } catch (err) {
+        console.error("Failed to update habit:", err);
+        showToast(`Could not update habit: ${err.message}`, "danger");
+      } finally {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = `<i class="bi bi-check-lg"></i> Save Changes`;
+        }
+      }
+    });
+  }
+
+  // Configurable Insights Analysis Window Selector
   const periodSelect = document.getElementById("insightsPeriodSelect");
   if (periodSelect) {
     periodSelect.addEventListener("change", (e) => {
@@ -940,6 +1081,70 @@ function setupEventListeners() {
   });
 }
 
+/**
+ * Prepares and opens the Edit Habit modal with current habit data.
+ */
+function openEditHabitModal(habitId) {
+  const habit = habits.find(h => h.id === habitId);
+  if (!habit) return;
+
+  const idInput = document.getElementById("editHabitIdInput");
+  const nameInput = document.getElementById("editHabitNameInput");
+  const descInput = document.getElementById("editHabitDescriptionInput");
+  const catSelect = document.getElementById("editHabitCategorySelect");
+  const todSelect = document.getElementById("editHabitTimeOfDaySelect");
+  const freqSelect = document.getElementById("editHabitFrequencySelect");
+  const timeInput = document.getElementById("editHabitTargetTimeInput");
+  const remToggle = document.getElementById("editHabitReminderToggle");
+  const remTimeInput = document.getElementById("editHabitReminderTimeInput");
+  const remTimeWrapper = document.getElementById("editHabitReminderTimeWrapper");
+  const modalEl = document.getElementById("editHabitModal");
+
+  if (idInput) idInput.value = habit.id;
+  if (nameInput) nameInput.value = habit.name || "";
+  if (descInput) descInput.value = habit.description || "";
+  if (catSelect) catSelect.value = habit.category || "Coding";
+  if (todSelect) todSelect.value = habit.time_of_day || habit.timeOfDay || "Morning";
+  if (freqSelect) freqSelect.value = habit.target_frequency || habit.frequency || "daily";
+
+  // Parse 24-hr time
+  let timeVal = "08:00";
+  if (habit.reminder && habit.reminder.reminder_time) {
+    timeVal = habit.reminder.reminder_time;
+  } else if (habit.target_time) {
+    const rawT = habit.target_time;
+    const m = rawT.match(/^(\d{1,2}):(\d{2})/);
+    if (m) {
+      let h = parseInt(m[1], 10);
+      const min = m[2];
+      if (/PM/i.test(rawT) && h < 12) h += 12;
+      if (/AM/i.test(rawT) && h === 12) h = 0;
+      timeVal = `${String(h).padStart(2, "0")}:${min}`;
+    }
+  }
+
+  if (timeInput) timeInput.value = timeVal;
+  if (remTimeInput) remTimeInput.value = (habit.reminder && habit.reminder.reminder_time) || timeVal;
+
+  const isEnabled = habit.reminder ? Boolean(habit.reminder.enabled) : true;
+  if (remToggle) {
+    remToggle.checked = isEnabled;
+    remToggle.onchange = () => {
+      if (remTimeWrapper) {
+        remTimeWrapper.style.opacity = remToggle.checked ? "1" : "0.5";
+      }
+    };
+  }
+  if (remTimeWrapper) {
+    remTimeWrapper.style.opacity = isEnabled ? "1" : "0.5";
+  }
+
+  if (modalEl && typeof bootstrap !== "undefined" && bootstrap.Modal) {
+    const inst = bootstrap.Modal.getOrCreateInstance(modalEl);
+    inst.show();
+  }
+}
+
 // ----------------------------------------------------------------------------
 // 7. SUMMARY KPI METRIC CALCULATIONS
 // ----------------------------------------------------------------------------
@@ -948,30 +1153,43 @@ function updateSummaryMetrics() {
   const completed = habits.filter(h => h.status === "completed").length;
   const completionRate = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-  // Best streak calculation from database-backed streaks
-  let maxStreak = 0;
+  // Current active streak (max current active streak)
+  let maxCurrentStreak = 0;
+  // Longest streak recorded (max of best_streak across habits)
+  let maxBestStreak = 0;
   let topHabitName = "--";
+
   habits.forEach(h => {
-    const s = typeof h.streak === "number" ? h.streak : 0;
-    if (s > maxStreak) {
-      maxStreak = s;
+    const curS = typeof h.streak === "number" ? h.streak : 0;
+    const bestS = typeof h.best_streak === "number" ? h.best_streak : (typeof h.bestStreak === "number" ? h.bestStreak : curS);
+    if (curS > maxCurrentStreak) {
+      maxCurrentStreak = curS;
+    }
+    if (bestS > maxBestStreak) {
+      maxBestStreak = bestS;
       topHabitName = h.name;
     }
   });
 
   // Top metric card DOM elements
-  const statBestStreak = document.getElementById("statBestStreak");
   const statCompletionRate = document.getElementById("statCompletionRate");
+  const statCurrentStreak = document.getElementById("statCurrentStreak");
+  const statBestStreak = document.getElementById("statBestStreak");
+  const statLongestStreak = document.getElementById("statLongestStreak");
+  const statCompletedHabits = document.getElementById("statCompletedHabits");
   const statActiveHabits = document.getElementById("statActiveHabits");
   const statStrongestHabit = document.getElementById("statStrongestHabit");
   const statStrongestStreak = document.getElementById("statStrongestStreak");
 
-  if (statBestStreak) statBestStreak.textContent = `${maxStreak} ${maxStreak === 1 ? "Day" : "Days"}`;
   if (statCompletionRate) statCompletionRate.textContent = `${completionRate}%`;
+  if (statCurrentStreak) statCurrentStreak.textContent = `${maxCurrentStreak} ${maxCurrentStreak === 1 ? "Day" : "Days"}`;
+  if (statBestStreak) statBestStreak.textContent = `${maxCurrentStreak} ${maxCurrentStreak === 1 ? "Day" : "Days"}`;
+  if (statLongestStreak) statLongestStreak.textContent = `${maxBestStreak} ${maxBestStreak === 1 ? "Day" : "Days"}`;
+  if (statCompletedHabits) statCompletedHabits.textContent = `${completed} / ${total}`;
   if (statActiveHabits) statActiveHabits.textContent = total;
   if (statStrongestHabit) statStrongestHabit.textContent = topHabitName;
   if (statStrongestStreak) {
-    statStrongestStreak.innerHTML = `<i class="bi bi-trophy-fill me-1"></i>${maxStreak} Day Record`;
+    statStrongestStreak.innerHTML = `<i class="bi bi-trophy-fill me-1"></i>${maxBestStreak} Day Record`;
   }
 
   // Hero Banner Progress Bar
@@ -1027,6 +1245,7 @@ function initCharts() {
   const weeklyCtx = document.getElementById("weeklyChart");
   if (weeklyCtx) {
     const weeklyData = calculateWeeklyConsistency();
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
     weeklyChartInstance = new Chart(weeklyCtx, {
       type: "bar",
       data: {
@@ -1034,7 +1253,7 @@ function initCharts() {
         datasets: [{
           label: "Habits Completed",
           data: weeklyData,
-          backgroundColor: "#4f46e5",
+          backgroundColor: isDark ? "#818cf8" : "#4f46e5",
           borderRadius: 6,
           barPercentage: 0.55
         }]
@@ -1045,7 +1264,7 @@ function initCharts() {
         plugins: {
           legend: { display: false },
           tooltip: {
-            backgroundColor: "#0f172a",
+            backgroundColor: isDark ? "#1e293b" : "#0f172a",
             padding: 10,
             cornerRadius: 8
           }
@@ -1054,11 +1273,11 @@ function initCharts() {
           y: {
             beginAtZero: true,
             ticks: { stepSize: 1, precision: 0, color: "#94a3b8" },
-            grid: { color: "#f1f5f9" }
+            grid: { color: isDark ? "rgba(255, 255, 255, 0.08)" : "#f1f5f9" }
           },
           x: {
             grid: { display: false },
-            ticks: { color: "#64748b", font: { weight: 500 } }
+            ticks: { color: isDark ? "#cbd5e1" : "#64748b", font: { weight: 500 } }
           }
         }
       }
@@ -1069,6 +1288,7 @@ function initCharts() {
   const timeCtx = document.getElementById("timeOfDayChart");
   if (timeCtx) {
     const timeData = getTimeDistributionData();
+    const isDark = document.documentElement.getAttribute("data-theme") === "dark";
     timeOfDayChartInstance = new Chart(timeCtx, {
       type: "doughnut",
       data: {
@@ -1076,7 +1296,8 @@ function initCharts() {
         datasets: [{
           data: timeData,
           backgroundColor: ["#f59e0b", "#3b82f6", "#8b5cf6"],
-          borderWidth: 0,
+          borderColor: isDark ? "#131b2e" : "#ffffff",
+          borderWidth: isDark ? 2 : 0,
           hoverOffset: 4
         }]
       },
@@ -1087,7 +1308,7 @@ function initCharts() {
         plugins: {
           legend: { display: false },
           tooltip: {
-            backgroundColor: "#0f172a",
+            backgroundColor: isDark ? "#1e293b" : "#0f172a",
             padding: 8,
             cornerRadius: 8
           }
@@ -3341,10 +3562,13 @@ function checkRemindersTick() {
     if (r.reminder_time !== currentHHMM) return;
 
     const habit = habits.find(h => h.id === r.habit_id);
-    const habitName = habit ? habit.name : (r.habit_name || `Habit #${r.habit_id}`);
+    // If habit is deleted, inactive, or missing from active habits, do not notify!
+    if (!habit || habit.active === 0) return;
 
     // RULE 6: Do not notify for a habit that is already completed for the relevant day!
-    if (habit && habit.status === "completed") return;
+    if (habit.status === "completed") return;
+
+    const habitName = habit.name || (r.habit_name || `Habit #${r.habit_id}`);
 
     // RULE 5: Avoid repeatedly notifying users for the same reminder during the same scheduled occurrence
     const occurrenceKey = `${today}_${r.habit_id}_${r.reminder_time}`;
@@ -3667,6 +3891,259 @@ function renderProgressReport(data) {
     ${goalsSummaryHtml}
   `;
 }
+
+// ----------------------------------------------------------------------------
+// 18. THEME MANAGEMENT (LIGHT / DARK / SYSTEM MODES & LOCALSTORAGE PERSISTENCE)
+// ----------------------------------------------------------------------------
+const THEME_STORAGE_KEY = "streaklab_theme";
+
+/**
+ * Returns the stored theme preference: 'light', 'dark', or 'system'.
+ * Defaults to 'system' if unset or invalid.
+ */
+function getStoredThemePreference() {
+  try {
+    const val = localStorage.getItem(THEME_STORAGE_KEY);
+    if (val === "light" || val === "dark" || val === "system") {
+      return val;
+    }
+  } catch (e) {
+    /* localStorage restricted */
+  }
+  return "system";
+}
+
+/**
+ * Checks system OS preference using window.matchMedia.
+ * Returns 'dark' if dark scheme is active, else 'light'.
+ */
+function getSystemTheme() {
+  try {
+    if (window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches) {
+      return "dark";
+    }
+  } catch (e) {
+    /* matchMedia not supported */
+  }
+  return "light";
+}
+
+/**
+ * Computes the effective active theme ('light' or 'dark') given a setting.
+ */
+function getEffectiveTheme(preference) {
+  if (preference === "light") return "light";
+  if (preference === "dark") return "dark";
+  return getSystemTheme();
+}
+
+/**
+ * Applies a theme setting ('light', 'dark', or 'system').
+ * Updates document element attributes, navbar UI, settings cards UI, and Chart.js colors.
+ */
+function applyTheme(themePreference, persist = true) {
+  const normalizedPref = (themePreference === "light" || themePreference === "dark" || themePreference === "system")
+    ? themePreference
+    : "system";
+
+  if (persist) {
+    try {
+      localStorage.setItem(THEME_STORAGE_KEY, normalizedPref);
+    } catch (e) {
+      console.warn("Theme localStorage persistence failed:", e);
+    }
+  }
+
+  const effectiveTheme = getEffectiveTheme(normalizedPref);
+
+  // Set StreakLab custom tokens and Bootstrap 5.3 theme
+  document.documentElement.setAttribute("data-theme", effectiveTheme);
+  document.documentElement.setAttribute("data-bs-theme", effectiveTheme);
+
+  // Update navbar toggle button and dropdown
+  updateNavbarThemeToggleUI(normalizedPref, effectiveTheme);
+
+  // Update settings view theme selector cards
+  updateSettingsThemeCardsUI(normalizedPref, effectiveTheme);
+
+  // Update active Chart.js colors dynamically
+  updateChartTheme(effectiveTheme === "dark");
+
+  return effectiveTheme;
+}
+
+/**
+ * Updates navbar toggle button icon, label, and dropdown item checkmarks.
+ */
+function updateNavbarThemeToggleUI(preference, effectiveTheme) {
+  const toggleIcon = document.getElementById("themeToggleIcon");
+  const toggleLabel = document.getElementById("themeToggleLabel");
+
+  if (toggleIcon) {
+    if (preference === "dark") {
+      toggleIcon.className = "bi bi-moon-stars-fill text-primary";
+    } else if (preference === "light") {
+      toggleIcon.className = "bi bi-sun-fill text-warning";
+    } else {
+      toggleIcon.className = "bi bi-circle-half text-secondary";
+    }
+  }
+
+  if (toggleLabel) {
+    if (preference === "system") {
+      toggleLabel.textContent = `Auto (${effectiveTheme === "dark" ? "Dark" : "Light"})`;
+    } else {
+      toggleLabel.textContent = preference.charAt(0).toUpperCase() + preference.slice(1);
+    }
+  }
+
+  // Update checkmark visibility in dropdown
+  const options = ["light", "dark", "system"];
+  options.forEach(opt => {
+    const capitalized = opt.charAt(0).toUpperCase() + opt.slice(1);
+    const checkIcon = document.getElementById(`themeCheck${capitalized}`);
+    if (checkIcon) {
+      if (preference === opt) {
+        checkIcon.classList.remove("d-none");
+      } else {
+        checkIcon.classList.add("d-none");
+      }
+    }
+  });
+}
+
+/**
+ * Updates Settings view theme buttons and status text.
+ */
+function updateSettingsThemeCardsUI(preference, effectiveTheme) {
+  const btnLight = document.getElementById("btnSettingsThemeLight");
+  const btnDark = document.getElementById("btnSettingsThemeDark");
+  const btnSystem = document.getElementById("btnSettingsThemeSystem");
+  const statusText = document.getElementById("settingsThemeStatusText");
+
+  if (btnLight) btnLight.classList.toggle("active", preference === "light");
+  if (btnDark) btnDark.classList.toggle("active", preference === "dark");
+  if (btnSystem) btnSystem.classList.toggle("active", preference === "system");
+
+  if (statusText) {
+    if (preference === "system") {
+      statusText.textContent = `Current mode: Following system preferences (Active: ${effectiveTheme === "dark" ? "Dark" : "Light"} theme)`;
+    } else if (preference === "dark") {
+      statusText.textContent = "Current mode: Dark theme (Manual)";
+    } else {
+      statusText.textContent = "Current mode: Light theme (Manual)";
+    }
+  }
+}
+
+/**
+ * Dynamically updates active Chart.js colors to match dark or light palette.
+ */
+function updateChartTheme(isDark) {
+  if (weeklyChartInstance) {
+    if (weeklyChartInstance.data && weeklyChartInstance.data.datasets && weeklyChartInstance.data.datasets[0]) {
+      weeklyChartInstance.data.datasets[0].backgroundColor = isDark ? "#818cf8" : "#4f46e5";
+    }
+    if (weeklyChartInstance.options && weeklyChartInstance.options.scales) {
+      if (weeklyChartInstance.options.scales.y && weeklyChartInstance.options.scales.y.grid) {
+        weeklyChartInstance.options.scales.y.grid.color = isDark ? "rgba(255, 255, 255, 0.08)" : "#f1f5f9";
+      }
+      if (weeklyChartInstance.options.scales.x && weeklyChartInstance.options.scales.x.ticks) {
+        weeklyChartInstance.options.scales.x.ticks.color = isDark ? "#cbd5e1" : "#64748b";
+      }
+    }
+    if (weeklyChartInstance.options && weeklyChartInstance.options.plugins && weeklyChartInstance.options.plugins.tooltip) {
+      weeklyChartInstance.options.plugins.tooltip.backgroundColor = isDark ? "#1e293b" : "#0f172a";
+    }
+    try {
+      weeklyChartInstance.update();
+    } catch (e) {
+      console.warn("Could not update weekly chart theme:", e);
+    }
+  }
+
+  if (timeOfDayChartInstance) {
+    if (timeOfDayChartInstance.data && timeOfDayChartInstance.data.datasets && timeOfDayChartInstance.data.datasets[0]) {
+      timeOfDayChartInstance.data.datasets[0].borderColor = isDark ? "#131b2e" : "#ffffff";
+      timeOfDayChartInstance.data.datasets[0].borderWidth = 2;
+    }
+    if (timeOfDayChartInstance.options && timeOfDayChartInstance.options.plugins && timeOfDayChartInstance.options.plugins.tooltip) {
+      timeOfDayChartInstance.options.plugins.tooltip.backgroundColor = isDark ? "#1e293b" : "#0f172a";
+    }
+    try {
+      timeOfDayChartInstance.update();
+    } catch (e) {
+      console.warn("Could not update time-of-day chart theme:", e);
+    }
+  }
+}
+
+/**
+ * Initializes Theme Manager: registers event listeners on navbar dropdown,
+ * settings buttons, and window OS media query changes.
+ */
+function initTheme() {
+  const currentPref = getStoredThemePreference();
+
+  // Apply immediately to ensure UI elements reflect current state
+  applyTheme(currentPref, false);
+
+  // Bind dropdown item clicks
+  document.querySelectorAll(".theme-select-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const val = btn.getAttribute("data-theme-value");
+      if (val) {
+        applyTheme(val, true);
+        showToastNotification(`Theme switched to ${val.charAt(0).toUpperCase() + val.slice(1)} mode`, "info");
+      }
+    });
+  });
+
+  // Bind settings view buttons
+  document.querySelectorAll(".settings-theme-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      const val = btn.getAttribute("data-theme-value");
+      if (val) {
+        applyTheme(val, true);
+        showToastNotification(`Theme set to ${val.charAt(0).toUpperCase() + val.slice(1)}`, "info");
+      }
+    });
+  });
+
+  // Listen for OS scheme changes when user preference is 'system'
+  try {
+    if (window.matchMedia) {
+      const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)");
+      const handleSystemChange = () => {
+        if (getStoredThemePreference() === "system") {
+          applyTheme("system", false);
+        }
+      };
+
+      if (typeof mediaQuery.addEventListener === "function") {
+        mediaQuery.addEventListener("change", handleSystemChange);
+      } else if (typeof mediaQuery.addListener === "function") {
+        mediaQuery.addListener(handleSystemChange);
+      }
+    }
+  } catch (e) {
+    console.warn("Could not register prefers-color-scheme listener:", e);
+  }
+}
+
+// Expose theme utilities globally for browser automation and testing
+window.StreakLabTheme = {
+  THEME_STORAGE_KEY,
+  getStoredThemePreference,
+  getSystemTheme,
+  getEffectiveTheme,
+  applyTheme,
+  updateChartTheme,
+  initTheme
+};
+
 
 
 

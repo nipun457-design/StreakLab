@@ -241,7 +241,7 @@ def init_db():
             );
         """)
 
-        # Table 5: habit_reminders (Phase 8: Smart Reminders & Notifications)
+        # Table 5: habit_reminders (Smart Reminders & Notifications)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS habit_reminders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -253,6 +253,34 @@ def init_db():
                 FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE
             );
         """)
+
+        # Safe migration for existing habits: ensure columns exist without data loss
+        habit_cols = [r[1] for r in conn.execute("PRAGMA table_info(habits)").fetchall()]
+        if 'reminder_time' not in habit_cols:
+            conn.execute("ALTER TABLE habits ADD COLUMN reminder_time TEXT DEFAULT '08:00';")
+        if 'reminder_enabled' not in habit_cols:
+            conn.execute("ALTER TABLE habits ADD COLUMN reminder_enabled INTEGER DEFAULT 1;")
+
+        # Migrate existing habits: ensure each active habit has a habit_reminders row
+        existing_habits = conn.execute("SELECT id, target_time, reminder_time, reminder_enabled FROM habits").fetchall()
+        for h_row in existing_habits:
+            hid = h_row[0]
+            t_time = str(h_row[1] or "08:00")
+            # Extract 24-hr time if available
+            m24 = re.match(r"^([01]\d|2[0-3]):[0-5]\d", t_time)
+            r_time = h_row[2] or (m24.group(0) if m24 else "08:00")
+            r_en = 1 if (h_row[3] is None or h_row[3] == 1) else 0
+
+            rem_check = conn.execute("SELECT id, reminder_time, enabled FROM habit_reminders WHERE habit_id = ?", (hid,)).fetchone()
+            if not rem_check:
+                conn.execute("""
+                    INSERT INTO habit_reminders (habit_id, reminder_time, enabled)
+                    VALUES (?, ?, ?)
+                """, (hid, r_time, r_en))
+            else:
+                conn.execute("""
+                    UPDATE habits SET reminder_time = ?, reminder_enabled = ? WHERE id = ?
+                """, (rem_check[1], rem_check[2], hid))
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_goals_habit ON habit_goals (habit_id);")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_lookup ON goal_milestones (habit_id, milestone_period);")
@@ -370,6 +398,8 @@ def habit_to_dict(row, include_stats=True, target_date=None):
     time_of_day = row["time_of_day"] if "time_of_day" in keys and row["time_of_day"] else "Morning"
     target_time = row["target_time"] if "target_time" in keys and row["target_time"] else "08:00 AM"
     target_frequency = row["target_frequency"] if "target_frequency" in keys and row["target_frequency"] else "daily"
+    raw_rem_time = row["reminder_time"] if "reminder_time" in keys and row["reminder_time"] else "08:00"
+    raw_rem_enabled = bool(row["reminder_enabled"]) if "reminder_enabled" in keys and row["reminder_enabled"] is not None else True
 
     habit_dict = {
         "id": row["id"],
@@ -382,12 +412,23 @@ def habit_to_dict(row, include_stats=True, target_date=None):
         "targetTime": target_time,
         "target_frequency": target_frequency,
         "frequency": target_frequency,
+        "reminder_time": raw_rem_time,
+        "reminder_enabled": raw_rem_enabled,
+        "reminderEnabled": raw_rem_enabled,
         "created_at": str(row["created_at"]),
         "active": row["active"]
     }
 
     if include_stats:
-        habit_dict["streak"] = calculate_streak(row["id"], target_date)
+        cur_streak = calculate_streak(row["id"], target_date)
+        habit_dict["streak"] = cur_streak
+        try:
+            parsed_d = parse_target_date(target_date) if 'parse_target_date' in globals() else None
+            best_streak = calculate_best_streak(row["id"], parsed_d, get_db())
+        except Exception:
+            best_streak = cur_streak
+        habit_dict["best_streak"] = best_streak
+        habit_dict["bestStreak"] = best_streak
         habit_dict["status"] = get_habit_status_for_date(row["id"], target_date)
         weekly = get_habit_weekly_history(row["id"], target_date)
         habit_dict["weekly_history"] = weekly
@@ -399,15 +440,28 @@ def habit_to_dict(row, include_stats=True, target_date=None):
             (row["id"],)
         ).fetchone()
         if rem_row:
+            rem_active = bool(rem_row["enabled"])
+            rem_t = rem_row["reminder_time"]
             habit_dict["reminder"] = {
-                "reminder_time": rem_row["reminder_time"],
-                "time": rem_row["reminder_time"],
-                "enabled": bool(rem_row["enabled"])
+                "reminder_time": rem_t,
+                "time": rem_t,
+                "enabled": rem_active
             }
+            habit_dict["reminder_time"] = rem_t
+            habit_dict["reminder_enabled"] = rem_active
+            habit_dict["reminderEnabled"] = rem_active
         else:
-            habit_dict["reminder"] = None
+            habit_dict["reminder"] = {
+                "reminder_time": raw_rem_time,
+                "time": raw_rem_time,
+                "enabled": raw_rem_enabled
+            }
     except Exception:
-        habit_dict["reminder"] = None
+        habit_dict["reminder"] = {
+            "reminder_time": raw_rem_time,
+            "time": raw_rem_time,
+            "enabled": raw_rem_enabled
+        }
 
     return habit_dict
 
@@ -469,8 +523,8 @@ def get_habits():
 @app.route('/api/habits', methods=['POST'])
 def create_habit():
     """
-    Creates a new habit in the SQLite database.
-    Expects JSON: { name, description?, category?, target_frequency?, time_of_day?, target_time? }
+    Creates a new habit in the SQLite database and automatically configures its reminder.
+    Expects JSON: { name, description?, category?, target_frequency?, time_of_day?, target_time?, reminder_time?, reminder_enabled? }
     """
     if not request.is_json:
         return jsonify({"error": "Request body must be JSON"}), 400
@@ -485,17 +539,72 @@ def create_habit():
     category = (data.get('category') or "General").strip()
     target_frequency = (data.get('target_frequency') or data.get('frequency') or "daily").strip()
     time_of_day = (data.get('time_of_day') or data.get('timeOfDay') or "Morning").strip()
-    target_time = (data.get('target_time') or data.get('targetTime') or "08:00 AM").strip()
+
+    # Time handling: support 24-hr (e.g. "08:30") or 12-hr (e.g. "08:30 AM")
+    raw_target_time = data.get('target_time') or data.get('targetTime') or data.get('time') or "08:00"
+    raw_target_time = str(raw_target_time).strip()
+
+    # Validation: reject malformed or out-of-range times
+    time_to_check = str(data.get('reminder_time') or data.get('reminderTime') or raw_target_time).strip()
+    m_check = re.match(r"^(\d{1,2}):(\d{2})(?:\s*(?:AM|PM))?$", time_to_check, re.IGNORECASE)
+    if m_check:
+        h, m = int(m_check.group(1)), int(m_check.group(2))
+        is_ampm = "AM" in time_to_check.upper() or "PM" in time_to_check.upper()
+        if is_ampm:
+            if h < 1 or h > 12 or m < 0 or m > 59:
+                return jsonify({"error": "Invalid time format. Hour must be 1-12 and minute 0-59"}), 400
+        else:
+            if h < 0 or h > 23 or m < 0 or m > 59:
+                return jsonify({"error": "Invalid time format. Hour must be 0-23 and minute 0-59"}), 400
+    elif time_to_check not in ("", "08:00 AM", "08:00"):
+        return jsonify({"error": "Invalid time format. Expected HH:MM or HH:MM AM/PM"}), 400
+
+    # Determine 24-hr reminder_time
+    rem_input = data.get('reminder_time') or data.get('reminderTime')
+    if rem_input:
+        rem_str = str(rem_input).strip()
+        m24 = re.match(r"^([01]\d|2[0-3]):[0-5]\d$", rem_str)
+        if m24:
+            rem_time_24 = rem_str
+        else:
+            try:
+                dt = datetime.strptime(rem_str.upper(), "%I:%M %p")
+                rem_time_24 = dt.strftime("%H:%M")
+            except ValueError:
+                rem_time_24 = "08:00"
+    else:
+        m24 = re.match(r"^([01]\d|2[0-3]):[0-5]\d$", raw_target_time)
+        if m24:
+            rem_time_24 = raw_target_time
+        else:
+            try:
+                dt = datetime.strptime(raw_target_time.upper(), "%I:%M %p")
+                rem_time_24 = dt.strftime("%H:%M")
+            except ValueError:
+                rem_time_24 = "08:00"
+
+    # Default reminder toggle is ON (True)
+    raw_en = data.get('reminder_enabled', data.get('reminderEnabled', True))
+    rem_enabled_val = 1 if raw_en in (True, 1, '1', 'true', 'True') else 0
+
+    target_time = raw_target_time
 
     db = get_db()
     cursor = db.execute("""
-        INSERT INTO habits (name, description, category, time_of_day, target_time, target_frequency, active)
-        VALUES (?, ?, ?, ?, ?, ?, 1)
-    """, (name, description, category, time_of_day, target_time, target_frequency))
+        INSERT INTO habits (name, description, category, time_of_day, target_time, target_frequency, reminder_time, reminder_enabled, active)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)
+    """, (name, description, category, time_of_day, target_time, target_frequency, rem_time_24, rem_enabled_val))
+    new_id = cursor.lastrowid
+
+    # Automatically persist habit reminder in habit_reminders table
+    db.execute("""
+        INSERT INTO habit_reminders (habit_id, reminder_time, enabled)
+        VALUES (?, ?, ?)
+    """, (new_id, rem_time_24, rem_enabled_val))
+
     db.commit()
     ai_explainer.invalidate_explanation_cache()
 
-    new_id = cursor.lastrowid
     row = db.execute("SELECT * FROM habits WHERE id = ?", (new_id,)).fetchone()
     return jsonify(habit_to_dict(row)), 201
 
@@ -515,9 +624,9 @@ def get_habit(habit_id):
 @app.route('/api/habits/<int:habit_id>', methods=['PUT'])
 def update_habit(habit_id):
     """
-    Updates an existing habit.
-    Supports partial updates for name, description, category, target_frequency,
-    time_of_day, target_time, and active status.
+    Updates an existing habit and synchronizes reminder settings.
+    Supports updates for name, description, category, target_frequency,
+    time_of_day, target_time, reminder_time, reminder_enabled, and active status.
     """
     if not request.is_json:
         return jsonify({"error": "Request body must be JSON"}), 400
@@ -545,12 +654,57 @@ def update_habit(habit_id):
     target_time = data.get('target_time', data.get('targetTime', existing['target_time']))
     active = data.get('active', existing['active'])
 
+    # Reminder fields
+    existing_keys = existing.keys()
+    curr_rem_time = existing['reminder_time'] if 'reminder_time' in existing_keys and existing['reminder_time'] else "08:00"
+    curr_rem_en = existing['reminder_enabled'] if 'reminder_enabled' in existing_keys and existing['reminder_enabled'] is not None else 1
+
+    reminder_time = data.get('reminder_time', data.get('reminderTime', curr_rem_time))
+    if reminder_time:
+        reminder_time = str(reminder_time).strip()
+        m_check = re.match(r"^(\d{1,2}):(\d{2})(?:\s*(?:AM|PM))?$", reminder_time, re.IGNORECASE)
+        if m_check:
+            h, m = int(m_check.group(1)), int(m_check.group(2))
+            is_ampm = "AM" in reminder_time.upper() or "PM" in reminder_time.upper()
+            if is_ampm:
+                if h < 1 or h > 12 or m < 0 or m > 59:
+                    return jsonify({"error": "Invalid reminder_time format. Hour must be 1-12 and minute 0-59"}), 400
+                dt = datetime.strptime(reminder_time.upper(), "%I:%M %p")
+                reminder_time = dt.strftime("%H:%M")
+            else:
+                if h < 0 or h > 23 or m < 0 or m > 59:
+                    return jsonify({"error": "Invalid reminder_time format. Hour must be 0-23 and minute 0-59"}), 400
+                reminder_time = f"{h:02d}:{m:02d}"
+        else:
+            return jsonify({"error": "Invalid reminder_time format. Expected HH:MM"}), 400
+
+    if 'reminder_enabled' in data or 'reminderEnabled' in data:
+        raw_en = data.get('reminder_enabled', data.get('reminderEnabled'))
+        rem_enabled_val = 1 if raw_en in (True, 1, '1', 'true', 'True') else 0
+    else:
+        rem_enabled_val = curr_rem_en
+
     db.execute("""
         UPDATE habits
         SET name = ?, description = ?, category = ?, time_of_day = ?, target_time = ?,
-            target_frequency = ?, active = ?
+            target_frequency = ?, reminder_time = ?, reminder_enabled = ?, active = ?
         WHERE id = ?
-    """, (name, description, category, time_of_day, target_time, target_frequency, active, habit_id))
+    """, (name, description, category, time_of_day, target_time, target_frequency, reminder_time, rem_enabled_val, active, habit_id))
+
+    # Synchronize habit_reminders table
+    existing_rem = db.execute("SELECT id FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()
+    if existing_rem:
+        db.execute("""
+            UPDATE habit_reminders
+            SET reminder_time = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE habit_id = ?
+        """, (reminder_time, rem_enabled_val, habit_id))
+    else:
+        db.execute("""
+            INSERT INTO habit_reminders (habit_id, reminder_time, enabled)
+            VALUES (?, ?, ?)
+        """, (habit_id, reminder_time, rem_enabled_val))
+
     db.commit()
     ai_explainer.invalidate_explanation_cache()
 
@@ -562,7 +716,7 @@ def update_habit(habit_id):
 def deactivate_habit(habit_id):
     """
     Deactivates a habit instead of permanently deleting its history.
-    Sets active = 0 to preserve past streak statistics.
+    Sets active = 0 to preserve past streak statistics and disables reminders.
     """
     db = get_db()
     existing = db.execute("SELECT * FROM habits WHERE id = ?", (habit_id,)).fetchone()
@@ -570,6 +724,7 @@ def deactivate_habit(habit_id):
         return jsonify({"error": "Habit not found"}), 404
 
     db.execute("UPDATE habits SET active = 0 WHERE id = ?", (habit_id,))
+    db.execute("UPDATE habit_reminders SET enabled = 0 WHERE habit_id = ?", (habit_id,))
     db.commit()
     ai_explainer.invalidate_explanation_cache()
 

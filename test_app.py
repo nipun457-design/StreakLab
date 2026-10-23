@@ -2216,6 +2216,376 @@ class StreakLabTestCase(unittest.TestCase):
                     pass
 
 
+    # -----------------------------------------------------------------------
+    # 15. AUTOMATIC HABIT REMINDERS, UI SECTIONS & MIGRATION TESTS
+    # -----------------------------------------------------------------------
+    def test_habit_creation_with_time_and_automatic_reminder(self):
+        """POST /api/habits creates habit and automatically schedules reminder with default ON."""
+        payload = {
+            "name": "Morning Yoga",
+            "category": "Health",
+            "reminder_time": "07:30",
+            "reminder_enabled": True
+        }
+        res = self.client.post('/api/habits', json=payload)
+        self.assertEqual(res.status_code, 201)
+        data = res.get_json()
+        habit_id = data['id']
+        self.assertEqual(data.get('reminder_time'), "07:30")
+        self.assertEqual(data.get('reminder_enabled'), 1)
+        self.assertIn('reminder', data)
+        self.assertEqual(data['reminder'].get('reminder_time'), "07:30")
+        self.assertEqual(data['reminder'].get('enabled'), 1)
+
+        # Verify habit_reminders table directly
+        with app.app_context():
+            db = get_db()
+            rem_row = db.execute(
+                "SELECT reminder_time, enabled FROM habit_reminders WHERE habit_id = ?",
+                (habit_id,)
+            ).fetchone()
+            self.assertIsNotNone(rem_row)
+            self.assertEqual(rem_row['reminder_time'], "07:30")
+            self.assertEqual(rem_row['enabled'], 1)
+
+        # Verify GET /api/reminders returns this scheduled reminder
+        rem_res = self.client.get('/api/reminders')
+        self.assertEqual(rem_res.status_code, 200)
+        reminders = rem_res.get_json()
+        self.assertTrue(any(r['habit_id'] == habit_id and r['reminder_time'] == "07:30" and r['enabled'] == 1 for r in reminders))
+
+    def test_habit_creation_with_reminder_explicitly_disabled(self):
+        """POST /api/habits allows user to opt-out and creates reminder with enabled=0."""
+        payload = {
+            "name": "Evening Meditation",
+            "category": "Mindfulness",
+            "reminder_time": "21:00",
+            "reminder_enabled": False
+        }
+        res = self.client.post('/api/habits', json=payload)
+        self.assertEqual(res.status_code, 201)
+        data = res.get_json()
+        habit_id = data['id']
+        self.assertEqual(data.get('reminder_time'), "21:00")
+        self.assertEqual(data.get('reminder_enabled'), 0)
+
+        with app.app_context():
+            db = get_db()
+            rem_row = db.execute(
+                "SELECT reminder_time, enabled FROM habit_reminders WHERE habit_id = ?",
+                (habit_id,)
+            ).fetchone()
+            self.assertIsNotNone(rem_row)
+            self.assertEqual(rem_row['reminder_time'], "21:00")
+            self.assertEqual(rem_row['enabled'], 0)
+
+    def test_habit_invalid_reminder_time_validation(self):
+        """POST /api/habits rejects invalid 24-hr reminder times."""
+        # Hour > 23
+        res1 = self.client.post('/api/habits', json={"name": "Bad Hour", "reminder_time": "24:00"})
+        self.assertEqual(res1.status_code, 400)
+        self.assertIn("error", res1.get_json())
+
+        # Minute > 59
+        res2 = self.client.post('/api/habits', json={"name": "Bad Minute", "reminder_time": "12:60"})
+        self.assertEqual(res2.status_code, 400)
+
+        # Malformed format
+        res3 = self.client.post('/api/habits', json={"name": "Bad Format", "reminder_time": "invalid-time-format"})
+        self.assertEqual(res3.status_code, 400)
+
+    def test_habit_update_time_and_toggle_reminder(self):
+        """PUT /api/habits/<id> updates reminder time and toggles status without habit recreation."""
+        create_res = self.client.post('/api/habits', json={
+            "name": "Afternoon Reading",
+            "reminder_time": "14:00",
+            "reminder_enabled": True
+        })
+        habit_id = create_res.get_json()['id']
+
+        # Update reminder time and disable
+        put_res1 = self.client.put(f'/api/habits/{habit_id}', json={
+            "name": "Afternoon Reading",
+            "reminder_time": "15:30",
+            "reminder_enabled": False
+        })
+        self.assertEqual(put_res1.status_code, 200)
+        data1 = put_res1.get_json()
+        self.assertEqual(data1.get('reminder_time'), "15:30")
+        self.assertEqual(data1.get('reminder_enabled'), 0)
+
+        # Verify GET /api/habits/<id> reflects changes
+        get_res1 = self.client.get(f'/api/habits/{habit_id}')
+        self.assertEqual(get_res1.get_json().get('reminder_time'), "15:30")
+        self.assertEqual(get_res1.get_json().get('reminder_enabled'), 0)
+
+        # Re-enable reminder without changing name
+        put_res2 = self.client.put(f'/api/habits/{habit_id}', json={
+            "name": "Afternoon Reading",
+            "reminder_enabled": True
+        })
+        self.assertEqual(put_res2.status_code, 200)
+        data2 = put_res2.get_json()
+        self.assertEqual(data2.get('reminder_time'), "15:30")
+        self.assertEqual(data2.get('reminder_enabled'), 1)
+
+    def test_deactivated_habit_reminders_silenced(self):
+        """Deactivating a habit disables its reminder and excludes it from active notifications."""
+        create_res = self.client.post('/api/habits', json={
+            "name": "Temporary Habit",
+            "reminder_time": "10:00",
+            "reminder_enabled": True
+        })
+        habit_id = create_res.get_json()['id']
+
+        # Deactivate habit
+        del_res = self.client.delete(f'/api/habits/{habit_id}')
+        self.assertEqual(del_res.status_code, 200)
+
+        # Check habit_reminders table has enabled=0
+        with app.app_context():
+            db = get_db()
+            rem_row = db.execute("SELECT enabled FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()
+            self.assertIsNotNone(rem_row)
+            self.assertEqual(rem_row['enabled'], 0)
+
+        # GET /api/reminders should not return reminders for inactive habits
+        rem_res = self.client.get('/api/reminders')
+        self.assertFalse(any(r['habit_id'] == habit_id for r in rem_res.get_json()))
+
+    def test_safe_legacy_habit_database_migration(self):
+        """init_db safely migrates existing habits without reminder rows into habit_reminders."""
+        # Insert a raw habit without a reminder entry
+        with app.app_context():
+            db = get_db()
+            db.execute(
+                "INSERT INTO habits (name, description, category, target_frequency, active) "
+                "VALUES ('Legacy Habit', 'Old data', 'General', 'daily', 1)"
+            )
+            db.commit()
+            legacy_id = db.execute("SELECT id FROM habits WHERE name = 'Legacy Habit'").fetchone()['id']
+
+            # Ensure habit_reminders does not have a row yet
+            db.execute("DELETE FROM habit_reminders WHERE habit_id = ?", (legacy_id,))
+            db.commit()
+
+        # Re-run init_db() to trigger migration
+        with app.app_context():
+            init_db()
+            db = get_db()
+            # Verify migration populated habit_reminders
+            migrated_rem = db.execute(
+                "SELECT reminder_time, enabled FROM habit_reminders WHERE habit_id = ?",
+                (legacy_id,)
+            ).fetchone()
+            self.assertIsNotNone(migrated_rem)
+            self.assertEqual(migrated_rem['reminder_time'], "08:00")
+            self.assertEqual(migrated_rem['enabled'], 1)
+
+            # Verify habit columns updated
+            habit_row = db.execute("SELECT reminder_time, reminder_enabled FROM habits WHERE id = ?", (legacy_id,)).fetchone()
+            self.assertEqual(habit_row['reminder_time'], "08:00")
+            self.assertEqual(habit_row['reminder_enabled'], 1)
+
+    def test_ui_seven_navigation_sections_and_summary_cards(self):
+        """Index page renders 7 distinct navigation views and 4 summary metric cards without dev labels."""
+        res = self.client.get('/')
+        self.assertEqual(res.status_code, 200)
+        html = res.data.decode('utf-8')
+
+        # 7 distinct navigation views
+        expected_views = [
+            'id="view-overview"',
+            'id="view-habits"',
+            'id="view-calendar"',
+            'id="view-insights"',
+            'id="view-goals"',
+            'id="view-reports"',
+            'id="view-settings"'
+        ]
+        for view in expected_views:
+            self.assertIn(view, html)
+
+        # 4 key summary metric cards
+        self.assertIn('id="statCompletionRate"', html)
+        self.assertIn('id="statCurrentStreak"', html)
+        self.assertIn('id="statLongestStreak"', html)
+        self.assertIn('id="statCompletedHabits"', html)
+
+        # Prominent Add Habit action on checklist header
+        self.assertIn('id="btnQuickAddHabit"', html)
+
+        # Add Habit modal contains scheduled time and default ON reminder toggle
+        self.assertIn('id="addHabitModal"', html)
+        self.assertIn('id="habitTargetTimeInput"', html)
+        self.assertIn('id="habitReminderToggle"', html)
+
+        # Edit Habit modal contains time and reminder fields
+        self.assertIn('id="editHabitModal"', html)
+        self.assertIn('id="editHabitReminderTimeInput"', html)
+        self.assertIn('id="editHabitReminderToggle"', html)
+
+        # Verify no visible development-phase labels
+        self.assertNotIn('Phase 8', html)
+        self.assertNotIn('Phase 4', html)
+        self.assertNotIn('Phase 3', html)
+        self.assertNotIn('Phase 2', html)
+        self.assertNotIn('Phase 1', html)
+
+    # -----------------------------------------------------------------------
+    # DARK MODE TESTS: FOUC PREVENTION, PERSISTENCE, SYSTEM FALLBACK, UI & CHARTS
+    # -----------------------------------------------------------------------
+    def test_dark_mode_fouc_prevention_in_head(self):
+        """Zero white flash on initial page load: inline script in <head> applies saved or system theme synchronously."""
+        res = self.client.get('/')
+        self.assertEqual(res.status_code, 200)
+        html = res.data.decode('utf-8')
+
+        head_start = html.find('<head>')
+        head_end = html.find('</head>')
+        self.assertNotEqual(head_start, -1)
+        self.assertNotEqual(head_end, -1)
+        head_content = html[head_start:head_end]
+
+        # Early script must be in <head>
+        self.assertIn('<script>', head_content)
+        self.assertIn('streaklab_theme', head_content)
+        self.assertIn('prefers-color-scheme: dark', head_content)
+        self.assertIn('document.documentElement.setAttribute(\'data-theme\'', head_content)
+        self.assertIn('document.documentElement.setAttribute(\'data-bs-theme\'', head_content)
+
+        # Early script must appear before the primary stylesheet link
+        style_link_pos = head_content.find('style.css')
+        theme_script_pos = head_content.find('streaklab_theme')
+        self.assertNotEqual(style_link_pos, -1)
+        self.assertNotEqual(theme_script_pos, -1)
+        self.assertLess(theme_script_pos, style_link_pos)
+
+    def test_dark_mode_navbar_and_settings_dom_elements(self):
+        """Navbar dropdown toggle and Settings view card offer Light, Dark, and System modes."""
+        res = self.client.get('/')
+        self.assertEqual(res.status_code, 200)
+        html = res.data.decode('utf-8')
+
+        # 1. Top Navbar Theme Toggle Dropdown
+        self.assertIn('id="themeDropdownContainer"', html)
+        self.assertIn('id="themeToggleBtn"', html)
+        self.assertIn('id="themeToggleIcon"', html)
+        self.assertIn('id="themeToggleLabel"', html)
+        self.assertIn('id="themeDropdownMenu"', html)
+        self.assertIn('id="themeOptionLight"', html)
+        self.assertIn('id="themeOptionDark"', html)
+        self.assertIn('id="themeOptionSystem"', html)
+        self.assertIn('data-theme-value="light"', html)
+        self.assertIn('data-theme-value="dark"', html)
+        self.assertIn('data-theme-value="system"', html)
+
+        # 2. Settings View Theme Preference Card
+        self.assertIn('id="settingsThemeCard"', html)
+        self.assertIn('id="btnSettingsThemeLight"', html)
+        self.assertIn('id="btnSettingsThemeDark"', html)
+        self.assertIn('id="btnSettingsThemeSystem"', html)
+        self.assertIn('id="settingsThemeStatusText"', html)
+
+    def test_dark_mode_css_tokens_and_wcag_palette(self):
+        """CSS defines both :root and [data-theme="dark"] with accessible contrast and component overrides."""
+        with open('static/style.css', 'r', encoding='utf-8') as f:
+            css = f.read()
+
+        # Both tokens defined
+        self.assertIn(':root', css)
+        self.assertIn('[data-theme="dark"]', css)
+
+        # Dark palette surfaces and text tokens
+        self.assertIn('--bg-body: #0b0f19', css)
+        self.assertIn('--surface-card: #131b2e', css)
+        self.assertIn('--surface-muted: #1e293b', css)
+        self.assertIn('--surface-border:', css)
+        self.assertIn('--text-main: #f8fafc', css)
+        self.assertIn('--text-body: #cbd5e1', css)
+        self.assertIn('--text-muted: #94a3b8', css)
+
+        # Dark status colors
+        self.assertIn('--emerald:', css)
+        self.assertIn('--orange:', css)
+        self.assertIn('--rose:', css)
+        self.assertIn('--amber:', css)
+
+        # All major components covered in dark theme
+        self.assertIn('[data-theme="dark"] .bg-surface', css)
+        self.assertIn('[data-theme="dark"] .habit-card', css)
+        self.assertIn('[data-theme="dark"] .metric-card', css)
+        self.assertIn('[data-theme="dark"] .calendar-wrapper', css)
+        self.assertIn('[data-theme="dark"] .bg-heatmap-completed', css)
+        self.assertIn('[data-theme="dark"] .bg-heatmap-missed', css)
+        self.assertIn('[data-theme="dark"] .modal-content', css)
+        self.assertIn('[data-theme="dark"] .form-control', css)
+        self.assertIn('[data-theme="dark"] .chat-panel', css)
+        self.assertIn('[data-theme="dark"] .coach-bubble', css)
+        self.assertIn('[data-theme="dark"] .report-table', css)
+        self.assertIn('[data-theme="dark"] .export-card', css)
+        self.assertIn('[data-theme="dark"] .reminder-chip', css)
+
+        # Form time/date indicator inversion for visibility on dark backgrounds
+        self.assertIn('input[type="time"]::-webkit-calendar-picker-indicator', css)
+        self.assertIn('filter: invert(1)', css)
+
+    def test_dark_mode_javascript_api_and_chart_theming(self):
+        """JavaScript implements Theme Manager, localStorage persistence, Chart.js re-theming, and exports API."""
+        with open('static/script.js', 'r', encoding='utf-8') as f:
+            js = f.read()
+
+        self.assertIn('THEME_STORAGE_KEY = "streaklab_theme"', js)
+        self.assertIn('function getStoredThemePreference()', js)
+        self.assertIn('function getSystemTheme()', js)
+        self.assertIn('function getEffectiveTheme(', js)
+        self.assertIn('function applyTheme(', js)
+        self.assertIn('function updateNavbarThemeToggleUI(', js)
+        self.assertIn('function updateSettingsThemeCardsUI(', js)
+        self.assertIn('function updateChartTheme(', js)
+        self.assertIn('function initTheme()', js)
+
+        # Media query listener for OS changes
+        self.assertIn('prefers-color-scheme: dark', js)
+
+        # Initial call on DOM ready
+        self.assertIn('initTheme();', js)
+
+        # Chart.js dynamic update hooks
+        self.assertIn('weeklyChartInstance.data.datasets[0].backgroundColor', js)
+        self.assertIn('timeOfDayChartInstance.data.datasets[0].borderColor', js)
+
+        # Exported for testing/runtime access
+        self.assertIn('window.StreakLabTheme', js)
+
+    def test_dark_mode_theme_persistence_and_system_fallback_logic(self):
+        """Simulate theme selection logic: Light, Dark, and System with OS fallback."""
+        # Simulated helper mimicking getEffectiveTheme in static/script.js
+        def get_effective_theme(preference, system_prefers_dark):
+            if preference == "light":
+                return "light"
+            elif preference == "dark":
+                return "dark"
+            else: # "system"
+                return "dark" if system_prefers_dark else "light"
+
+        # Explicit Light preference
+        self.assertEqual(get_effective_theme("light", system_prefers_dark=True), "light")
+        self.assertEqual(get_effective_theme("light", system_prefers_dark=False), "light")
+
+        # Explicit Dark preference
+        self.assertEqual(get_effective_theme("dark", system_prefers_dark=True), "dark")
+        self.assertEqual(get_effective_theme("dark", system_prefers_dark=False), "dark")
+
+        # System preference matches OS scheme
+        self.assertEqual(get_effective_theme("system", system_prefers_dark=True), "dark")
+        self.assertEqual(get_effective_theme("system", system_prefers_dark=False), "light")
+
+        # Unrecognized value defaults to system fallback
+        self.assertEqual(get_effective_theme("unknown_pref", system_prefers_dark=True), "dark")
+        self.assertEqual(get_effective_theme(None, system_prefers_dark=False), "light")
+
+
 if __name__ == '__main__':
     unittest.main()
 

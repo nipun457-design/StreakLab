@@ -77,6 +77,70 @@
 }
 
 /* --------------------------------------------------------------------------
+   DARK THEME TOKENS (DATA-THEME="DARK")
+   -------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  /* Brand Primary & Accents */
+  --primary: #6366f1;
+  --primary-hover: #818cf8;
+  --primary-subtle: rgba(99, 102, 241, 0.16);
+  --primary-border: rgba(99, 102, 241, 0.35);
+  --primary-ring: rgba(99, 102, 241, 0.45);
+  --brand-gradient: linear-gradient(135deg, #6366f1 0%, #818cf8 50%, #a5b4fc 100%);
+  
+  /* Status Colors (Accessible WCAG contrast against dark backgrounds) */
+  --emerald: #34d399;
+  --emerald-hover: #10b981;
+  --emerald-subtle: rgba(16, 185, 129, 0.16);
+  --emerald-border: rgba(52, 211, 153, 0.35);
+  --emerald-text: #a7f3d0;
+
+  --orange: #fb923c;
+  --orange-subtle: rgba(249, 115, 22, 0.16);
+  --orange-border: rgba(251, 146, 60, 0.35);
+  --orange-text: #fed7aa;
+
+  --rose: #f87171;
+  --rose-hover: #ef4444;
+  --rose-subtle: rgba(239, 68, 68, 0.16);
+  --rose-border: rgba(248, 113, 113, 0.35);
+  --rose-text: #fecaca;
+
+  --amber: #fbbf24;
+  --amber-hover: #f59e0b;
+  --amber-subtle: rgba(245, 158, 11, 0.16);
+  --amber-border: rgba(251, 191, 36, 0.35);
+  --amber-text: #fde68a;
+
+  --purple: #a78bfa;
+  --purple-subtle: rgba(139, 92, 246, 0.16);
+  --purple-border: rgba(167, 139, 250, 0.35);
+
+  /* Surfaces & Backgrounds (Sleek deep SaaS dark palette) */
+  --bg-body: #0b0f19;
+  --surface-card: #131b2e;
+  --surface-muted: #1e293b;
+  --surface-border: #2a374f;
+  --surface-border-subtle: #1e293b;
+  --text-main: #f8fafc;
+  --text-body: #cbd5e1;
+  --text-muted: #94a3b8;
+  --text-light: #64748b;
+
+  /* Time of Day Themes */
+  --morning-color: #fbbf24;
+  --afternoon-color: #60a5fa;
+  --evening-color: #c084fc;
+
+  /* Shadows for dark mode */
+  --shadow-xs: 0 1px 2px 0 rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 1px 3px 0 rgba(0, 0, 0, 0.45), 0 1px 2px -1px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.5), 0 2px 4px -2px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.55), 0 4px 6px -4px rgba(0, 0, 0, 0.4);
+  --shadow-hover: 0 12px 24px -4px rgba(99, 102, 241, 0.28);
+}
+
+/* --------------------------------------------------------------------------
    2. GLOBAL RESETS & TYPOGRAPHY
    -------------------------------------------------------------------------- */
 *, *::before, *::after {
@@ -1049,3 +1113,489 @@ h1, h2, h3, h4, h5, h6, .brand-text {
   background-color: var(--primary-hover);
   border-color: var(--primary-hover);
 }
+
+/* --------------------------------------------------------------------------
+   17. DARK THEME COMPONENT OVERRIDES & ACCESSIBILITY ENHANCEMENTS
+   -------------------------------------------------------------------------- */
+/* Navigation & Surfaces */
+[data-theme="dark"] .bg-surface {
+  background-color: rgba(19, 27, 46, 0.94);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--surface-border) !important;
+}
+
+[data-theme="dark"] .navbar-toggler i {
+  color: var(--text-main) !important;
+}
+
+[data-theme="dark"] .navbar-nav .nav-link {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .navbar-nav .nav-link:hover {
+  color: var(--text-main);
+  background-color: var(--surface-muted);
+}
+
+[data-theme="dark"] .navbar-nav .nav-link.active {
+  color: var(--primary) !important;
+  background-color: var(--primary-subtle) !important;
+}
+
+[data-theme="dark"] .date-chip {
+  background-color: var(--surface-muted);
+  border-color: var(--surface-border);
+  color: var(--text-body);
+}
+
+/* General Bootstrap Surface Mappings in Dark Mode */
+[data-theme="dark"] .bg-white {
+  background-color: var(--surface-card) !important;
+}
+
+[data-theme="dark"] .bg-light {
+  background-color: var(--surface-muted) !important;
+}
+
+[data-theme="dark"] .text-dark {
+  color: var(--text-main) !important;
+}
+
+[data-theme="dark"] .border {
+  border-color: var(--surface-border) !important;
+}
+
+[data-theme="dark"] .border-bottom {
+  border-color: var(--surface-border) !important;
+}
+
+[data-theme="dark"] .border-top {
+  border-color: var(--surface-border) !important;
+}
+
+[data-theme="dark"] .card {
+  background-color: var(--surface-card);
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .welcome-card {
+  background: var(--surface-card);
+  border-color: var(--surface-border) !important;
+}
+
+[data-theme="dark"] .banner-stat-box {
+  background: var(--surface-muted) !important;
+  border-color: var(--surface-border) !important;
+}
+
+[data-theme="dark"] .banner-progress {
+  background-color: var(--surface-border);
+}
+
+[data-theme="dark"] .metric-card {
+  background: var(--surface-card);
+  border-color: var(--surface-border) !important;
+}
+
+[data-theme="dark"] .habits-section-card {
+  background: var(--surface-card);
+  border-color: var(--surface-border) !important;
+}
+
+/* Dropdown Menus */
+[data-theme="dark"] .dropdown-menu {
+  background-color: var(--surface-card);
+  border-color: var(--surface-border);
+  box-shadow: var(--shadow-lg);
+}
+
+[data-theme="dark"] .dropdown-item {
+  color: var(--text-body);
+}
+
+[data-theme="dark"] .dropdown-item:hover,
+[data-theme="dark"] .dropdown-item:focus {
+  background-color: var(--surface-muted);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .dropdown-item.active,
+[data-theme="dark"] .dropdown-item:active {
+  background-color: var(--primary-subtle);
+  color: var(--primary);
+}
+
+/* Habit Cards */
+[data-theme="dark"] .habit-card {
+  background: var(--surface-card);
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .habit-card:hover {
+  border-color: #475569;
+  box-shadow: var(--shadow-md);
+}
+
+[data-theme="dark"] .habit-card.status-completed {
+  border-color: rgba(52, 211, 153, 0.4);
+  background-color: rgba(16, 185, 129, 0.12);
+}
+
+[data-theme="dark"] .habit-card.status-completed .habit-name {
+  color: var(--emerald-text);
+}
+
+[data-theme="dark"] .habit-card.status-missed {
+  border-color: rgba(248, 113, 113, 0.4);
+  background-color: rgba(239, 68, 68, 0.12);
+}
+
+[data-theme="dark"] .habit-card.status-missed .habit-name {
+  color: var(--rose-text);
+}
+
+[data-theme="dark"] .habit-card.status-skipped {
+  border-color: rgba(251, 191, 36, 0.4);
+  background-color: rgba(245, 158, 11, 0.12);
+}
+
+[data-theme="dark"] .habit-card.status-skipped .habit-name {
+  color: var(--amber-text);
+}
+
+[data-theme="dark"] .action-btn-group {
+  background-color: var(--surface-muted);
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .btn-status {
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .btn-status:hover {
+  background-color: var(--surface-border);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .filter-pill-group .filter-btn {
+  border-color: var(--surface-border);
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .filter-pill-group .filter-btn:hover {
+  background-color: var(--surface-muted);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .status-legend-bar {
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .dot-pending {
+  background-color: var(--surface-border);
+}
+
+/* Calendar Heatmap in Dark Mode */
+[data-theme="dark"] .calendar-wrapper {
+  background: var(--surface-card);
+}
+
+[data-theme="dark"] .calendar-day-cell {
+  background-color: var(--surface-muted);
+  color: var(--text-body);
+}
+
+[data-theme="dark"] .bg-heatmap-completed {
+  background-color: rgba(16, 185, 129, 0.25) !important;
+  color: #6ee7b7 !important;
+  border: 1px solid rgba(52, 211, 153, 0.4);
+}
+
+[data-theme="dark"] .bg-heatmap-partial {
+  background-color: rgba(245, 158, 11, 0.25) !important;
+  color: #fde047 !important;
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+[data-theme="dark"] .bg-heatmap-missed {
+  background-color: rgba(239, 68, 68, 0.25) !important;
+  color: #fca5a5 !important;
+  border: 1px solid rgba(248, 113, 113, 0.4);
+}
+
+[data-theme="dark"] .bg-heatmap-skipped {
+  background-color: rgba(249, 115, 22, 0.25) !important;
+  color: #fdba74 !important;
+  border: 1px solid rgba(251, 146, 60, 0.4);
+}
+
+[data-theme="dark"] .bg-heatmap-unrecorded {
+  background-color: var(--surface-muted) !important;
+  color: var(--text-muted) !important;
+  border: 1px solid var(--surface-border);
+}
+
+[data-theme="dark"] .bg-heatmap-future {
+  background-color: rgba(11, 15, 25, 0.6) !important;
+  color: #475569 !important;
+  border: 1px dashed var(--surface-border) !important;
+}
+
+/* Pattern Insights & Goal Cards */
+[data-theme="dark"] .ai-insight-card {
+  border-color: var(--surface-border) !important;
+}
+
+[data-theme="dark"] .pattern-card {
+  background: var(--surface-card);
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .pattern-strong_routine {
+  background-color: rgba(16, 185, 129, 0.12);
+}
+
+[data-theme="dark"] .pattern-at_risk_habit,
+[data-theme="dark"] .pattern-repeated_misses {
+  background-color: rgba(239, 68, 68, 0.12);
+}
+
+[data-theme="dark"] .pattern-weekday_dropoff,
+[data-theme="dark"] .pattern-peak_performance_day {
+  background-color: rgba(99, 102, 241, 0.12);
+}
+
+[data-theme="dark"] .pattern-streak_milestone {
+  background-color: rgba(249, 115, 22, 0.12);
+}
+
+[data-theme="dark"] .goal-card {
+  background: var(--surface-card);
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .badge-status-completed {
+  background: rgba(16, 185, 129, 0.18);
+  color: #a7f3d0;
+  border-color: rgba(52, 211, 153, 0.4);
+}
+
+[data-theme="dark"] .badge-status-overdue {
+  background: rgba(239, 68, 68, 0.18);
+  color: #fecaca;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+[data-theme="dark"] .badge-status-active {
+  background: rgba(99, 102, 241, 0.18);
+  color: #c7d2fe;
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+[data-theme="dark"] .goal-card.goal-overdue {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+/* Reminder Chips & Alerts */
+[data-theme="dark"] .reminder-chip.reminder-active {
+  background-color: rgba(245, 158, 11, 0.18);
+  color: #fde68a;
+  border-color: rgba(251, 191, 36, 0.4);
+}
+
+[data-theme="dark"] .reminder-chip.reminder-active:hover {
+  background-color: rgba(245, 158, 11, 0.28);
+}
+
+[data-theme="dark"] .reminder-chip.reminder-none {
+  background-color: var(--surface-muted);
+  color: var(--text-muted);
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .reminder-chip.reminder-none:hover {
+  background-color: var(--surface-border);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .reminder-alert-banner {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.15) 0%, rgba(217, 119, 6, 0.2) 100%);
+  border-color: rgba(251, 191, 36, 0.35);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .alert-info {
+  background-color: rgba(99, 102, 241, 0.14) !important;
+  border-color: rgba(99, 102, 241, 0.3) !important;
+  color: var(--text-body) !important;
+}
+
+/* Reports & Export Cards */
+[data-theme="dark"] .report-kpi-card {
+  background: var(--surface-muted);
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .report-highlight-success {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+[data-theme="dark"] .report-highlight-warning {
+  background: rgba(239, 68, 68, 0.12);
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+[data-theme="dark"] .report-table-wrapper {
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .report-table {
+  color: var(--text-body);
+}
+
+[data-theme="dark"] .report-table th {
+  background-color: var(--surface-muted);
+  color: var(--text-muted);
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .report-table td {
+  border-color: var(--surface-border);
+  color: var(--text-body);
+}
+
+[data-theme="dark"] .export-card {
+  background: var(--surface-card) !important;
+  border-color: var(--surface-border) !important;
+}
+
+[data-theme="dark"] .export-card:hover {
+  border-color: var(--primary) !important;
+}
+
+/* Floating AI Coach Panel */
+[data-theme="dark"] .chat-panel {
+  background: var(--surface-card);
+  border-color: var(--surface-border) !important;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5) !important;
+}
+
+[data-theme="dark"] .chat-messages {
+  background-color: var(--bg-body);
+}
+
+[data-theme="dark"] .coach-bubble {
+  background: var(--surface-card);
+  border-color: var(--surface-border);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .chat-chip-btn {
+  background: var(--surface-card);
+  border-color: var(--surface-border);
+  color: var(--text-body);
+}
+
+[data-theme="dark"] .chat-chip-btn:hover {
+  background-color: var(--surface-muted);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .chat-msg.user .chat-msg-avatar {
+  background: var(--surface-muted);
+  color: var(--text-muted);
+}
+
+[data-theme="dark"] .chat-textarea {
+  background-color: var(--surface-muted);
+  border-color: var(--surface-border);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .chat-textarea:focus {
+  background-color: var(--surface-card);
+  color: var(--text-main);
+}
+
+/* Modals & Forms */
+[data-theme="dark"] .modal-content {
+  background-color: var(--surface-card);
+  border-color: var(--surface-border);
+  color: var(--text-body);
+}
+
+[data-theme="dark"] .modal-header,
+[data-theme="dark"] .modal-footer {
+  border-color: var(--surface-border);
+}
+
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select {
+  background-color: var(--surface-muted);
+  border-color: var(--surface-border);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .form-control:focus,
+[data-theme="dark"] .form-select:focus {
+  background-color: var(--surface-card);
+  border-color: var(--primary);
+  color: var(--text-main);
+}
+
+[data-theme="dark"] .form-control::placeholder {
+  color: var(--text-light);
+}
+
+[data-theme="dark"] .form-text {
+  color: var(--text-muted);
+}
+
+/* Chrome/Firefox Date and Time Picker Icon Inversion for Visibility */
+[data-theme="dark"] input[type="time"]::-webkit-calendar-picker-indicator,
+[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  cursor: pointer;
+}
+
+[data-theme="dark"] .btn-close {
+  filter: invert(1) grayscale(100%);
+}
+
+[data-theme="dark"] .btn-outline-secondary {
+  border-color: var(--surface-border);
+  color: var(--text-body);
+}
+
+[data-theme="dark"] .btn-outline-secondary:hover,
+[data-theme="dark"] .btn-outline-secondary.active {
+  background-color: var(--surface-muted);
+  border-color: var(--surface-border);
+  color: var(--text-main);
+}
+
+/* Settings Theme Selection Buttons */
+.settings-theme-btn {
+  background: var(--surface-card);
+  border: 1px solid var(--surface-border);
+  color: var(--text-body);
+  transition: var(--transition-fast);
+}
+
+.settings-theme-btn:hover {
+  background-color: var(--surface-muted);
+  border-color: var(--primary-border);
+  color: var(--text-main);
+}
+
+.settings-theme-btn.active {
+  border-color: var(--primary) !important;
+  background-color: var(--primary-subtle) !important;
+  color: var(--primary) !important;
+  font-weight: 700;
+  box-shadow: 0 0 0 2px var(--primary-ring);
+}
+

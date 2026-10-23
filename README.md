@@ -2,7 +2,7 @@
 
 A smart habit tracking and behavioral analytics platform for students, developers, and habit-builders.
 
-StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based Statistical Pattern Engine**, a **Hybrid AI Coaching Layer**, an interactive **Floating AI Habit Coach Chatbox**, and comprehensive **Phase 8 Smart Reminders, Goals & Milestones, Multi-Period Progress Reports, and Secure CSV Data Export**—delivering conversational habit insights, quantifying consistency trends, and providing evidence-grounded recommendations while remaining 100% functional offline.
+StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based Statistical Pattern Engine**, a **Hybrid AI Coaching Layer**, an interactive **Floating AI Habit Coach Chatbox**, and comprehensive **Automatic Habit Reminders, 7-Section Product UI, Goals & Milestones, Multi-Period Progress Reports, and Secure CSV Data Export**—delivering conversational habit insights, quantifying consistency trends, and providing evidence-grounded recommendations while remaining 100% functional offline and seamlessly deployable on Vercel.
 
 ---
 
@@ -10,14 +10,15 @@ StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based 
 
 * **The Problem**: Conventional habit trackers only record binary completions. They fail to reveal *why* routines break down, *when* willpower drops, or *how* weekends and times of day impact follow-through. Rigid streak systems also penalize legitimate rest days, inducing "streak fatigue" and abandonment.
 * **The Solution**: StreakLab introduces:
-  1. **Rest-Preserving Streaks**: Excused pauses (`skipped`) preserve consecutive momentum.
-  2. **Deterministic Pattern Engine**: Quantifies weekday drop-offs, peak days, time-of-day biases, and consecutive missed trends.
-  3. **Real AI Habit Coach Chatbox (Phase 6)**: An interactive floating coach grounded directly in your SQLite check-in history. Ask questions naturally and receive conversational coaching without hallucinations.
-  4. **Smart Reminders & Browser Notifications (Phase 8)**: Per-habit reminder schedules, user-gesture permission model, in-app banner fallback, and local time handling without duplicate alerts.
-  5. **Goals, Deadlines & Milestones (Phase 7 & 8)**: Measurable targets (weekly frequency, target streaks, total completions) with deadlines, progress tracking, and duplicate-proof milestone badges.
-  6. **Multi-Period Progress Reports (Phase 8)**: Daily, weekly, and monthly reports with completion statistics, strengths, and areas needing attention computed from stored records.
-  7. **Secure CSV Data Export (Phase 8)**: UTF-8 BOM exports for Habits, Records, Goals, and Reports protected against spreadsheet formula injection (`=+-@\t\r`).
-  8. **Guaranteed Offline Resilience**: Runs seamlessly without internet access or API keys using deterministic local fallbacks.
+  1. **Automatic Habit Reminders & Local Scheduling**: Users choose reminder times while creating habits (ON by default), with seamless time editing, toggle controls, and duplicate prevention.
+  2. **Organized Product Navigation (7 Views)**: Clear separation into Overview, My Habits, Calendar, Insights, Goals, Reports, and Settings with a unified 4-card metric summary.
+  3. **Rest-Preserving Streaks**: Excused pauses (`skipped`) preserve consecutive momentum.
+  4. **Deterministic Pattern Engine**: Quantifies weekday drop-offs, peak days, time-of-day biases, and consecutive missed trends.
+  5. **Real AI Habit Coach Chatbox**: An interactive floating coach grounded directly in your SQLite check-in history without hallucinations.
+  6. **Goals, Deadlines & Milestones**: Measurable targets (weekly frequency, target streaks, total completions) with deadlines, progress tracking, and duplicate-proof milestone badges.
+  7. **Multi-Period Progress Reports**: Daily, weekly, and monthly reports with completion statistics, strengths, and areas needing attention computed from stored records.
+  8. **Secure CSV Data Export**: UTF-8 BOM exports for Habits, Records, Goals, and Reports protected against spreadsheet formula injection (`=+-@\t\r`).
+  9. **Guaranteed Offline Resilience & Serverless Safety**: Runs seamlessly without internet access or API keys using deterministic local fallbacks, with automatic `/tmp` database resolution on Vercel.
 * **Target Users**:
   * Students balancing coursework, project deadlines, and personal habits.
   * Developers establishing daily coding, reading, and wellness routines.
@@ -29,12 +30,12 @@ StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based 
 
 | Layer | Technologies | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | HTML5, Vanilla ES6 JavaScript, Bootstrap 5.3, Bootstrap Icons, Chart.js | Responsive SPA dashboard, modal forms, Chart.js graphs, floating AI chatbox with chips and bubbles, XSS-safe DOM rendering |
-| **Backend** | Python 3.14+, Flask 3.1+ | RESTful API, request validation, sliding-window rate limiting, contextual database connection management (`g.db`) |
-| **Database** | SQLite 3 (`instance/streaklab.db`) | ACID persistence, foreign key enforcement (`PRAGMA foreign_keys = ON`), UPSERT conflict handling, indices |
+| **Frontend** | HTML5, Vanilla ES6 JavaScript, Bootstrap 5.3, Bootstrap Icons, Chart.js | 7-section single-page application (SPA), modal forms, Chart.js graphs, floating AI chatbox, XSS-safe DOM rendering |
+| **Backend** | Python 3.14+, Flask 3.1+ | RESTful API, request validation, sliding-window rate limiting, contextual database connection management (`g.db`), Vercel WSGI support |
+| **Database** | SQLite 3 (`instance/streaklab.db` locally, `/tmp/streaklab.db` on Vercel) | ACID persistence, foreign key enforcement (`PRAGMA foreign_keys = ON`), automatic non-destructive column migrations, UPSERT conflict handling |
 | **Statistical Engine** | Python (`pattern_engine.py`) | **Source of Truth**: Best streaks, active completion rates, weekday drop-offs, peak days, consecutive misses, progress reports |
 | **AI Habit Coach** | Python (`ai_explainer.py`), Google Gemini / OpenAI APIs | Conversational habit coaching grounded in SQLite data, prompt injection defense, sliding-window IP rate limiter, deterministic offline fallback |
-| **Automated Testing**  | Python `unittest`, `unittest.mock` (`test_app.py`) | 94 isolated automated unit and integration tests using temporary SQLite databases (100% mocked AI) |
+| **Automated Testing**  | Python `unittest`, `unittest.mock` (`test_app.py`) | 107 isolated automated unit and integration tests using temporary SQLite databases (100% mocked AI) |
 
 ---
 
@@ -386,39 +387,21 @@ AI_TIMEOUT=6
 
 ### Step 1: Open PowerShell in Project Folder
 ```powershell
-cd c:\Users\nipun\OneDrive\Desktop\StreakLab
-```
-
-### Step 2: Configure Optional AI Provider (Securely in PowerShell)
-The application works 100% offline with zero configuration. To connect a real AI provider:
-
-```powershell
-# Copy the template to .env (git-ignored)
-Copy-Item .env.example .env
-
-# Configure your provider and API key in .env (or in PowerShell session):
-$env:AI_PROVIDER="gemini"
-$env:AI_API_KEY="your_actual_google_gemini_api_key_here"
-$env:AI_MODEL="gemini-1.5-flash"
-```
-
-> **Security Note**: Never commit `.env` or paste your API key in Git-tracked files. `.env` is permanently excluded via `.gitignore`.
-
-### Step 3: Run the Complete Automated Test Suite (94 Tests)
+cd c:### Step 3: Run the Complete Automated Test Suite (107 Tests)
 ```powershell
 .\.venv\Scripts\python.exe -m unittest test_app.py
 ```
 **Actual Output**:
 ```text
-...........................AI provider returned invalid non-list response; using local fallback.
+....................................AI provider returned invalid non-list response; using local fallback.
 ..AI provider failed (gemini): Connection timed out. Gracefully falling back to local engine.
 .............AI provider returned empty chat response; using local fallback.
 ....AI Coach provider failed (gemini): URLError: Failed connecting with key AI_KEY_VERY_SECRET_DO_NOT_REVEAL_XYZ123. Falling back to local coach.
 ....AI Coach provider failed (gemini): Connection timed out. Falling back to local coach.
 .AI Coach provider failed (gemini): Gemini API returned HTTP 500. Falling back to local coach.
-...........................................
+...............................................
 ----------------------------------------------------------------------
-Ran 94 tests in 9.080s
+Ran 107 tests in 16.008s
 
 OK
 ```
@@ -430,7 +413,7 @@ OK
 **Console Output**:
 ```text
 ============================================================
-[*] Starting StreakLab Flask Backend with SQLite (Phase 8)...
+[*] Starting StreakLab Flask Backend with SQLite...
 [*] Database Path : C:\Users\nipun\OneDrive\Desktop\StreakLab\instance\streaklab.db
 [*] Dashboard URL  : http://127.0.0.1:5000
 [*] Health API    : http://127.0.0.1:5000/api/health
@@ -449,72 +432,90 @@ OK
  * Running on http://127.0.0.1:5000
 ```
 
-### Step 5: Explore Phase 8 Features in the Browser
+### Step 5: Explore StreakLab Features in the Browser
 1. Open **`http://127.0.0.1:5000`** in your browser.
-2. **Smart Reminders & Browser Notifications**:
-   - In each habit card, click the **Set Reminder** / **Bell** chip to configure a daily time (e.g. `08:30`) and toggle reminders on/off.
-   - Click the top navigation **Bell icon** to open the **Notification Settings Modal**:
-     - Review your browser notification permission status (`default`, `granted`, or `denied`).
-     - Click **"Enable Browser Notifications"** to trigger the browser prompt (strictly requested on user gesture).
-     - Read the transparent explanation about background limitations: standard browser notifications require the tab to be open or active.
-     - If notifications are denied or unsupported, a visible **In-App Reminder Banner** automatically alerts you when scheduled times arrive.
-     - Reminders are suppressed if the habit is already marked **Completed** today or if already notified in the current minute window.
-3. **Enhanced Goals, Deadlines & Milestones**:
-   - Click **+ Set Habit Goal** to select among:
-     - **Weekly Frequency**: Target 1–7 completions per week.
-     - **Target Streak**: Reach a consecutive day streak (e.g. 14, 21, 30 days).
-     - **Total Completions**: Total lifetime completions (e.g. 50, 100 sessions).
-   - Set an optional **Target Deadline** (`YYYY-MM-DD`).
-   - Goals are dynamically categorized as **Active** (in progress), **Completed** (target achieved), or **Overdue** (past deadline without completion).
-   - Edit any goal anytime using the pencil button on the goal card.
-4. **Progress Reports (Daily, Weekly, Monthly)**:
-   - Navigate to the **Progress Reports & Analytics** section.
-   - Switch between **Daily**, **Weekly**, and **Monthly** tabs.
-   - Pick any reference date and click **Generate Report**.
-   - Review high-level KPI cards (Total Habits, Completion Rate, Completed/Missed/Skipped counts, Active Goals).
-   - Inspect **Top Performing Habits** and **Habits Needing Attention** calculated from evidence.
-   - Browse the detailed habit breakdown table with current and best streaks.
+2. **Automatic Habit Reminders & Workflow**:
+   - Click **New Habit** or the **+ Add Habit** button on the Today's Habit Checklist header.
+   - Choose a scheduled time (e.g. `08:00 AM`). The **Daily Reminder** toggle is switch **ON by default**.
+   - Upon creation, the habit and its scheduled reminder are persisted automatically in both `habits` and `habit_reminders` tables.
+   - Click the **Pencil (Edit)** button on any habit card to adjust the scheduled time, disable a reminder, or re-enable it without recreating the habit.
+   - When a habit is marked **Done** for today or deleted, reminders are automatically silenced.
+3. **Organized 7-Section Product Navigation**:
+   - **Overview**: Hero summary, 4 unified metric cards (Completion Rate, Current Streak, Longest Streak, Completed Habits), Today's Habit Checklist, and compact charts.
+   - **My Habits**: Complete habit catalog management, target frequency, reminders, and edit controls.
+   - **Calendar**: Full-width interactive habit activity heatmap and date inspection modal.
+   - **Insights**: Evidence-grounded behavioral pattern detection, peak performance days, and weekly review cards.
+   - **Goals**: Target milestones (weekly, streak, total), target deadlines, and duplicate-proof badge celebrations.
+   - **Reports**: Daily, weekly, and monthly progress reviews computed from stored SQLite records.
+   - **Settings**: Browser notification permissions, active reminder schedule management, and CSV data exports.
+4. **Browser Notifications & In-App Alert Fallback**:
+   - Click **Reminders** in the top navigation bar to open the Notification Settings modal.
+   - Observe the live permission badge: `Not Requested Yet`, `Checking...`, `Notifications Enabled` (Granted), `Blocked in Browser` (Denied), or `Unsupported in Browser`.
+   - Click **Enable Notifications** to trigger the browser prompt on explicit user gesture.
+   - If browser notifications are disabled or the tab is blurred, prominent in-app alert banners automatically appear at the scheduled minute.
 5. **CSV Data Export Center**:
-   - In the **CSV Data Export Center**, click any of the 4 dedicated download buttons:
-     - **Habits List**: Active habits, categories, schedules, reminders, current streaks, and best streaks.
-     - **Check-in History**: Chronological log of check-in records (`completed`, `missed`, `skipped`).
-     - **Goals & Milestones**: Active and achieved goals, target types, progress, deadlines, and milestone badges.
-     - **Current Progress Report**: Filtered snapshot of the currently selected progress report.
-   - All CSV downloads include UTF-8 BOM (`utf-8-sig`) for Microsoft Excel compatibility and defuse spreadsheet formula injection by sanitizing fields starting with `=`, `+`, `-`, `@`, `\t`, or `\r`.
-6. Chat with the **AI Habit Coach**:
-   - Ask *"What are my habit reminders?"* or *"How are my habit goals this week?"* to see your active targets and schedules.
+   - Download UTF-8 BOM CSV files for Habits, Check-in Records, Goals & Milestones, and Progress Reports with built-in formula injection defenses.
+6. **Conversational AI Habit Coach**:
+   - Click the floating robot icon or top navbar **AI Coach** button to chat about your routines, slumps, or upcoming goals.
 
 ---
 
-## ⚠️ Known Limitations & Browser Realities
+## ⚠️ Browser Realities, Background Push & Serverless Deployment
 
-1. **Browser Notification Background Limitations**:
-   - Standard browser `Notification.requestPermission()` and `new Notification()` operate within the browser execution context.
-   - In accordance with web platform standards, notifications require the page to be open in a browser tab or window. If the browser is completely closed, ordinary web page JavaScript does not run without a dedicated Service Worker and Push Server infrastructure (Web Push API). StreakLab clearly communicates this limitation in the Notification Settings modal.
-   - When browser notifications are unsupported or permissions are denied, StreakLab provides a persistent in-app alert banner (`#inAppReminderAlertContainer`) so users never miss a reminder while using the dashboard.
-2. **Cold-Start Window**:
-   - Pattern detection and multi-day trend analysis require at least 3 daily check-in records to prevent premature generalization from tiny samples. Single-day reports and daily checklists remain fully operational immediately.
-3. **Discrete Time-of-Day Slots**:
-   - Habit organization uses discrete categories (`Morning`, `Afternoon`, `Evening`) and user-configured `HH:MM` reminder schedules.
+### 1. Browser Notification Execution Context & Honesty
+- Standard browser Web Notifications (`Notification.requestPermission()` and `new Notification()`) run inside the browser tab context.
+- **Tab Activity Requirement**: In standard web browsers, client-side JavaScript timers (`setInterval` / `setTimeout`) only fire while the browser has an open or backgrounded tab running the application. Ordinary web page JavaScript cannot execute when the browser application is completely closed.
+- StreakLab transparently informs users of this requirement and provides an automatic **in-app banner alert** fallback so users never miss a reminder while actively using the application.
+
+### 2. Reliable Background Notifications via Web Push & VAPID (Optional Production Architecture)
+To deliver persistent background reminders when the browser tab or entire web browser is closed, the application requires the W3C Push API, a Service Worker, and a Web Push protocol server:
+
+1. **Service Worker**: A registered background service worker (`sw.js`) that listens for `push` events and displays notifications via `self.registration.showNotification()`.
+2. **VAPID Key Pair**: Voluntary Application Server Identification (VAPID) credentials generated using `pywebpush`:
+   ```bash
+   pip install pywebpush
+   python -c "from pywebpush import webpush; import json; print(json.dumps(webpush.generate_vapid_keypair()))"
+   ```
+3. **Environment-Only Secrets Configuration**:
+   ```ini
+   VAPID_PUBLIC_KEY=BK...
+   VAPID_PRIVATE_KEY=your_vapid_private_key_secret_here
+   VAPID_CLAIM_EMAIL=mailto:admin@streaklab.app
+   ```
+4. **Strict Security Requirement**:
+   - `VAPID_PRIVATE_KEY`, API secrets, and server configuration must **never** be exposed in frontend JavaScript, templates, or committed to GitHub repositories.
+   - Only `VAPID_PUBLIC_KEY` is shared with client-side `pushManager.subscribe()`.
+5. **Persistent Background Scheduler**: A persistent background task runner (e.g., Celery with Redis, APScheduler worker, or cron-triggered webhook) queries scheduled reminders each minute and transmits encrypted Web Push payloads to the browser vendor's push service (e.g. Mozilla autopush, Google FCM).
+
+### 3. Vercel Serverless Deployment Safety
+- **Read-Only Filesystem**: Serverless runtimes on Vercel mount the application directory (`/var/task`) as read-only. Attempting to create folders or write SQLite databases in `/var/task/instance/` produces an immediate `OSError: [Errno 30] Read-only file system` error.
+- **Configurable Database Path**: In `app.py`, `get_database_path()` dynamically checks `os.environ.get('VERCEL')`. When running in Vercel serverless mode, it automatically resolves to `/tmp/streaklab.db` before any directory creation or database connection:
+  ```python
+  if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
+      return '/tmp/streaklab.db'
+  ```
+- **Local Consistency**: In local development, StreakLab continues using the project directory `instance/streaklab.db`.
 
 ---
 
 ## 📚 Supplementary Documentation
 
-* **[Architecture Document](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/ARCHITECTURE.md)**: System flow diagrams, component boundaries, schema tables (`habit_reminders`, `habit_goals`, `goal_milestones`), security model, and formula injection defense.
-* **[Testing Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/TESTING.md)**: Full test matrix (94 test cases), isolation details, mock specifications, and manual verification checklist.
-* **[Demo Presentation Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/DEMO_GUIDE.md)**: Step-by-step live demonstration script covering Reminders, Goals, Progress Reports, CSV Export, AI Chatbox, and Phase 7 Heatmap.
+* **[Architecture Document](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/ARCHITECTURE.md)**: System flow diagrams, component boundaries, schema tables (`habits`, `habit_records`, `habit_reminders`, `habit_goals`, `goal_milestones`), security model, and formula injection defense.
+* **[Testing Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/TESTING.md)**: Full test matrix (107 test cases), isolation details, mock specifications, and manual verification checklist.
+* **[Demo Presentation Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/DEMO_GUIDE.md)**: Step-by-step live demonstration script covering Reminders, Goals, Progress Reports, CSV Export, AI Chatbox, and Calendar Heatmap.
 
 ---
 
 ## 📅 Development Roadmap Status
 
-- [x] **Phase 1**: Interactive HTML5, CSS3, JavaScript dashboard with Chart.js and filters.
-- [x] **Phase 2A**: Flask backend foundation and `/api/health` diagnostic endpoint.
-- [x] **Phase 2B**: SQLite database integration (`instance/streaklab.db`), RESTful API endpoints, streak calculation, and frontend API wiring.
-- [x] **Phase 3**: Rule-based habit pattern detection engine (`pattern_engine.py`), `/api/insights`, `/api/analytics`, configurable window selector, and statistical metrics.
-- [x] **Phase 4**: Hybrid AI explanation and recommendation engine (`ai_explainer.py`), Gemini and OpenAI integrations, local deterministic fallback, in-memory cache with mutation invalidation, and `/api/insights/explanations`.
-- [x] **Phase 5**: Final Polish, Edge-Case Verification, Expanded Test Suite, Comprehensive Documentation (`docs/`), and Submission Preparation.
-- [x] **Phase 6**: Real AI Habit Coach Chatbox (`/api/chat`), floating frontend chatbox with suggestion chips, DOM-safe rendering, evidence grounding, sliding-window rate limiting, and 17 automated mock-isolated test scenarios.
-- [x] **Phase 7**: Smart Progress and Goal Tracking (`/api/calendar`, `/api/reviews/weekly`, `/api/goals`, `/api/milestones/acknowledge`), Habit Calendar Heatmap with date inspection modal, Weekly Progress Review with grounded AI explanations, and Weekly Target Goals with duplicate-prevented milestone notifications.
-- [x] **Phase 8**: Smart Reminders & Notifications (`/api/reminders`), Goals & Milestones enhancements (`PUT /api/goals`, streak/total targets, deadlines, active/overdue/completed states), Multi-Period Progress Reports (`/api/reports` daily/weekly/monthly), and Secure CSV Data Export (`/api/export` with UTF-8 BOM and spreadsheet formula injection defense).
+- [x] **Foundation & Diagnostics**: Flask backend foundation, SQLite database integration (`instance/streaklab.db`), RESTful API endpoints, streak calculation, and `/api/health` diagnostic endpoint.
+- [x] **Behavioral Pattern Engine**: Rule-based habit pattern detection engine (`pattern_engine.py`), `/api/insights`, `/api/analytics`, configurable window selector, and statistical metrics.
+- [x] **Hybrid AI Explanations**: Evidence-grounded explanations and recommendations (`ai_explainer.py`), Gemini and OpenAI integrations, local deterministic fallback, and `/api/insights/explanations`.
+- [x] **Real AI Habit Coach Chatbox**: Conversational AI Coach (`/api/chat`), floating frontend chatbox with suggestion chips, DOM-safe rendering, evidence grounding, and sliding-window rate limiting.
+- [x] **Progress & Goal Tracking**: Habit Calendar Heatmap (`/api/calendar`), Weekly Progress Review (`/api/reviews/weekly`), Goals & Milestones (`/api/goals`), and duplicate-prevented badge celebrations.
+- [x] **Automatic Habit Reminders**: Reminder time selection and default-ON toggle during habit creation, 1-to-1 persistence in `habits` and `habit_reminders`, edit time & toggle controls, local time scheduling, and automatic silence on habit completion/deletion.
+- [x] **Organized 7-Section Product UI**: Dedicated views (Overview, My Habits, Calendar, Insights, Goals, Reports, Settings), unified 4-card metric summary, prominent Add Habit trigger, and elimination of development-phase jargon.
+- [x] **Multi-Period Reports & CSV Export**: Daily, weekly, and monthly reports (`/api/reports`), UTF-8 BOM CSV exports (`/api/export`) protected against formula injection (`=+-@\t\r`).
+- [x] **Vercel Serverless Safety**: Dynamic `/tmp/streaklab.db` path resolution, eliminating read-only filesystem errors.
+- [x] **Automated Test Suite**: 107 isolated automated unit and integration tests passing with 100% mocked AI and temporary database fixtures.
+
