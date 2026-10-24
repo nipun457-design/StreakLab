@@ -479,7 +479,7 @@ OK
   - **PWA Installation**: Implemented Web App Manifest (`static/manifest.json`), responsive icons (`static/icons/`), and root service worker (`static/sw.js`).
   - **Explicit User Interaction**: Permission is requested only after clicking "Enable Mobile Push" (never unprompted on page load).
   - **VAPID Security**: Server-side Web Push delivery via `push_service.py` using `pywebpush` and `py-vapid`. Public key is safely exposed via `GET /api/push/status`; private key remains securely in server environment variables.
-  - **Background Serverless Scheduler**: Does not rely on Flask background threads (which terminate immediately upon serverless response completion). Reminders are checked via `GET /api/cron/reminders`, securely configured as a Vercel Cron Job (`* * * * *`) and authenticated with `CRON_SECRET`.
+  - **Background Serverless Scheduler**: Does not rely on Flask background threads (which terminate immediately upon serverless response completion). Reminders are checked via `GET /api/cron/reminders`, securely configured as a Vercel Cron Job (`0 9 * * *`, daily at 09:00 UTC) and authenticated with `CRON_SECRET`.
   - **Duplicate Prevention**: Every sent notification logs an immutable event in `habit_notification_logs (habit_id, notification_date)`. If a habit is already completed for today or was already notified, delivery is automatically suppressed.
   - **Expired Subscriptions Pruning**: When browser push services return HTTP 404 or 410 (Gone), expired endpoints are automatically deactivated from `push_subscriptions`.
 
@@ -542,21 +542,21 @@ In your Vercel Project Dashboard, navigate to **Settings** > **Environment Varia
 | `GEMINI_API_KEY` | *(Optional)* | For AI Habit Coach provider |
 
 ### Step 4: Configure the Push Reminder Scheduler
-StreakLab includes a preconfigured Vercel Cron trigger in `vercel.json`:
+StreakLab includes a preconfigured Vercel Cron trigger in `vercel.json` compatible with Vercel Hobby plan limits (once daily at 09:00 UTC):
 ```json
 {
   "crons": [
     {
       "path": "/api/cron/reminders",
-      "schedule": "* * * * *"
+      "schedule": "0 9 * * *"
     }
   ]
 }
 ```
-* **Vercel Pro Plans**: Vercel Cron automatically runs every minute and supplies `Authorization: Bearer <CRON_SECRET>`.
-* **Vercel Hobby / External Schedulers**: Set up a free recurring cron monitor on [cron-job.org](https://cron-job.org) or [updown.io](https://updown.io) targeting:
+* **Vercel Hobby Plan**: Vercel Cron supports daily cron expressions such as `0 9 * * *` (09:00 UTC daily) and automatically delivers `Authorization: Bearer <CRON_SECRET>`.
+* **Frequent Reminders / External Schedulers**: If you require reminders evaluated multiple times per day or every few minutes on a Hobby plan, set up a free recurring cron monitor on [cron-job.org](https://cron-job.org) or [updown.io](https://updown.io) targeting:
   - **URL**: `https://your-streaklab.vercel.app/api/cron/reminders`
-  - **Interval**: Every 1 minute (or every 5 minutes)
+  - **Interval**: e.g., Every 5 or 15 minutes
   - **Header**: `Authorization: Bearer <your-CRON_SECRET>` (or `x-cron-secret: <your-CRON_SECRET>`)
 
 ### Step 5: (Optional) Migrate Existing Local SQLite Records to PostgreSQL
