@@ -722,7 +722,7 @@ async function handleStatusChange(habitId, targetStatus) {
   // Prevent duplicate concurrent clicks on the same habit
   if (activeRecordRequests.has(habitId)) return;
 
-  const habit = habits.find(h => h.id === habitId);
+  const habit = habits.find(h => Number(h.id) === Number(habitId) || String(h.id) === String(habitId));
   if (!habit) return;
 
   const currentStatus = habit.status || "pending";
@@ -798,7 +798,7 @@ async function handleStatusChange(habitId, targetStatus) {
 async function deleteHabit(habitId) {
   if (activeDeleteRequests.has(habitId)) return;
 
-  const habit = habits.find(h => h.id === habitId);
+  const habit = habits.find(h => Number(h.id) === Number(habitId) || String(h.id) === String(habitId));
   if (!habit) return;
 
   const confirmed = window.confirm(`Archive "${habit.name}"? Historical streaks will be preserved in SQLite.`);
@@ -808,7 +808,7 @@ async function deleteHabit(habitId) {
   renderHabits();
 
   try {
-    const response = await fetch(`/api/habits/${habitId}`, {
+    const response = await fetch(`/api/habits/${habit.id}`, {
       method: "DELETE"
     });
 
@@ -818,8 +818,8 @@ async function deleteHabit(habitId) {
     }
 
     // Remove from in-memory active habits list
-    habits = habits.filter(h => h.id !== habitId);
-    configuredReminders = configuredReminders.filter(r => r.habit_id !== habitId);
+    habits = habits.filter(h => Number(h.id) !== Number(habit.id));
+    configuredReminders = configuredReminders.filter(r => Number(r.habit_id) !== Number(habit.id));
 
     showToast(`Habit "${habit.name}" archived successfully.`, "secondary");
     updateSummaryMetrics();
@@ -973,8 +973,12 @@ function setupEventListeners() {
       const remTimeInput = document.getElementById("editHabitReminderTimeInput");
       const saveBtn = document.getElementById("btnSaveEditHabit");
 
-      const habitId = idInput ? parseInt(idInput.value, 10) : null;
-      if (!habitId) return;
+      const rawIdVal = idInput ? idInput.value : null;
+      const habitId = rawIdVal ? parseInt(rawIdVal, 10) : null;
+      if (!habitId || isNaN(habitId)) {
+        showToast("Invalid habit ID. Please refresh and try again.", "danger");
+        return;
+      }
 
       const name = nameInput ? nameInput.value.trim() : "";
       if (!name) {
@@ -993,7 +997,7 @@ function setupEventListeners() {
         description: descInput ? descInput.value.trim() : "",
         category: catSelect ? catSelect.value : "General",
         time_of_day: todSelect ? todSelect.value : "Morning",
-        target_frequency: freqSelect ? freqSelect.value : "daily",
+        target_frequency: freqSelect ? freqSelect.value : "Daily",
         target_time: formattedTime,
         reminder_time: remTime,
         reminder_enabled: remEnabled
@@ -1019,9 +1023,28 @@ function setupEventListeners() {
         const updatedHabit = await response.json();
 
         // Update in-memory habits list
-        const idx = habits.findIndex(h => h.id === habitId);
+        const idx = habits.findIndex(h => Number(h.id) === Number(habitId) || String(h.id) === String(habitId));
         if (idx !== -1) {
           habits[idx] = updatedHabit;
+        }
+
+        // Synchronize in-memory configuredReminders
+        const remIdx = configuredReminders.findIndex(r => Number(r.habit_id) === Number(habitId));
+        if (updatedHabit.reminder && updatedHabit.reminder.enabled) {
+          const remObj = {
+            id: (updatedHabit.reminder && updatedHabit.reminder.id) || habitId,
+            habit_id: habitId,
+            habit_name: updatedHabit.name,
+            reminder_time: updatedHabit.reminder.reminder_time,
+            enabled: 1
+          };
+          if (remIdx !== -1) {
+            configuredReminders[remIdx] = remObj;
+          } else {
+            configuredReminders.push(remObj);
+          }
+        } else if (remIdx !== -1) {
+          configuredReminders[remIdx].enabled = 0;
         }
 
         // Close modal
@@ -1036,6 +1059,8 @@ function setupEventListeners() {
         updateSummaryMetrics();
         updateCharts();
         loadInsightsFromApi(currentInsightsDays);
+        populateCalendarHabitSelect();
+        populateGoalHabitSelect();
         loadCalendarHeatmap();
         loadWeeklyReview();
         loadGoalsAndMilestones();
@@ -1085,7 +1110,8 @@ function setupEventListeners() {
  * Prepares and opens the Edit Habit modal with current habit data.
  */
 function openEditHabitModal(habitId) {
-  const habit = habits.find(h => h.id === habitId);
+  if (habitId === undefined || habitId === null) return;
+  const habit = habits.find(h => Number(h.id) === Number(habitId) || String(h.id) === String(habitId));
   if (!habit) return;
 
   const idInput = document.getElementById("editHabitIdInput");
@@ -1103,17 +1129,39 @@ function openEditHabitModal(habitId) {
   if (idInput) idInput.value = habit.id;
   if (nameInput) nameInput.value = habit.name || "";
   if (descInput) descInput.value = habit.description || "";
-  if (catSelect) catSelect.value = habit.category || "Coding";
-  if (todSelect) todSelect.value = habit.time_of_day || habit.timeOfDay || "Morning";
-  if (freqSelect) freqSelect.value = habit.target_frequency || habit.frequency || "daily";
+  if (catSelect) catSelect.value = habit.category || "General";
+
+  if (todSelect) {
+    const rawTod = (habit.time_of_day || habit.timeOfDay || "Morning").toString().toLowerCase();
+    if (rawTod === "afternoon") {
+      todSelect.value = "Afternoon";
+    } else if (rawTod === "evening") {
+      todSelect.value = "Evening";
+    } else {
+      todSelect.value = "Morning";
+    }
+  }
+
+  if (freqSelect) {
+    const rawFreq = (habit.target_frequency || habit.frequency || "Daily").toString().toLowerCase();
+    if (rawFreq === "weekdays") {
+      freqSelect.value = "Weekdays";
+    } else if (rawFreq === "weekends") {
+      freqSelect.value = "Weekends";
+    } else {
+      freqSelect.value = "Daily";
+    }
+  }
 
   // Parse 24-hr time
   let timeVal = "08:00";
   if (habit.reminder && habit.reminder.reminder_time) {
     timeVal = habit.reminder.reminder_time;
-  } else if (habit.target_time) {
-    const rawT = habit.target_time;
-    const m = rawT.match(/^(\d{1,2}):(\d{2})/);
+  } else if (habit.reminder_time) {
+    timeVal = habit.reminder_time;
+  } else if (habit.target_time || habit.targetTime) {
+    const rawT = habit.target_time || habit.targetTime;
+    const m = String(rawT).match(/^(\d{1,2}):(\d{2})/);
     if (m) {
       let h = parseInt(m[1], 10);
       const min = m[2];
@@ -1124,9 +1172,9 @@ function openEditHabitModal(habitId) {
   }
 
   if (timeInput) timeInput.value = timeVal;
-  if (remTimeInput) remTimeInput.value = (habit.reminder && habit.reminder.reminder_time) || timeVal;
+  if (remTimeInput) remTimeInput.value = (habit.reminder && habit.reminder.reminder_time) || habit.reminder_time || timeVal;
 
-  const isEnabled = habit.reminder ? Boolean(habit.reminder.enabled) : true;
+  const isEnabled = habit.reminder ? Boolean(habit.reminder.enabled) : (habit.reminder_enabled !== undefined ? Boolean(habit.reminder_enabled) : true);
   if (remToggle) {
     remToggle.checked = isEnabled;
     remToggle.onchange = () => {
@@ -3013,6 +3061,9 @@ function initPhase8() {
   // Check and display initial Notification permission status
   updateNotificationPermissionUI();
 
+  // Initialize Service Worker and Web Push Notifications (Priority 3)
+  initServiceWorkerAndPush();
+
   // Set up event listeners for Phase 8 controls
   setupPhase8EventListeners();
 
@@ -3069,14 +3120,31 @@ function setupPhase8EventListeners() {
     });
   }
 
-  // Request browser permission buttons across Settings view and Reminders Modal
+  // Request browser permission & mobile push subscription buttons
   const btnRequestPerms = document.querySelectorAll(".btn-request-browser-permission, #btnRequestBrowserPermission, #btnModalRequestBrowserPermission");
   btnRequestPerms.forEach(btn => {
     btn.addEventListener("click", (e) => {
       e.preventDefault();
-      requestBrowserNotificationPermission();
+      subscribeDeviceToPush();
     });
   });
+
+  // Push Test and Disable buttons
+  const btnSendTest = document.getElementById("btnSendTestPush");
+  if (btnSendTest) {
+    btnSendTest.addEventListener("click", (e) => {
+      e.preventDefault();
+      triggerTestPushNotification();
+    });
+  }
+
+  const btnDisable = document.getElementById("btnDisablePush");
+  if (btnDisable) {
+    btnDisable.addEventListener("click", (e) => {
+      e.preventDefault();
+      disableDevicePush();
+    });
+  }
 
   // Reminders Modal lifecycle: refresh permission UI & reminder lists whenever shown
   const notifModal = document.getElementById("notificationSettingsModal");
@@ -3264,6 +3332,10 @@ function updateNotificationPermissionUI(overrideState = null) {
   navBellIcons.forEach(bell => {
     bell.className = "bi bi-bell text-warning";
   });
+
+  if (typeof updatePushSubscriptionUI === "function") {
+    updatePushSubscriptionUI();
+  }
 }
 
 /**
@@ -3271,6 +3343,313 @@ function updateNotificationPermissionUI(overrideState = null) {
  */
 function checkNotificationPermissionState() {
   updateNotificationPermissionUI();
+}
+
+// ----------------------------------------------------------------------------
+// WEB PUSH & SERVICE WORKER NOTIFICATIONS (PRIORITY 3)
+// ----------------------------------------------------------------------------
+
+let swRegistration = null;
+let currentPushSubscription = null;
+let backendVapidPublicKey = null;
+let isPushConfiguredOnServer = false;
+
+/**
+ * Converts a base64url string to a Uint8Array for PushManager subscription.
+ */
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding)
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+
+  for (let i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+/**
+ * Registers root Service Worker (/sw.js) and inspects push subscription state.
+ */
+async function initServiceWorkerAndPush() {
+  const badge = document.getElementById("pushSubscriptionBadge");
+
+  if (!("serviceWorker" in navigator)) {
+    if (badge) {
+      badge.textContent = "Service Worker: Unsupported";
+      badge.className = "badge bg-secondary rounded-pill small";
+    }
+    return;
+  }
+
+  try {
+    // Register service worker at root scope
+    swRegistration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+
+    // Fetch VAPID public key & backend configuration status
+    try {
+      const statusRes = await fetch("/api/push/status");
+      if (statusRes.ok) {
+        const statusData = await statusRes.json();
+        backendVapidPublicKey = statusData.vapid_public_key;
+        isPushConfiguredOnServer = Boolean(statusData.is_configured);
+      }
+    } catch (err) {
+      console.warn("Could not query /api/push/status:", err);
+    }
+
+    if (!("PushManager" in window)) {
+      if (badge) {
+        badge.textContent = "Web Push: Unsupported";
+        badge.className = "badge bg-secondary rounded-pill small";
+      }
+      return;
+    }
+
+    // Check existing push subscription
+    const reg = await navigator.serviceWorker.ready;
+    swRegistration = reg;
+    currentPushSubscription = await reg.pushManager.getSubscription();
+
+    updatePushSubscriptionUI();
+  } catch (err) {
+    console.error("Service worker registration or push check failed:", err);
+  }
+}
+
+/**
+ * Updates UI elements according to the device's push subscription and permission status.
+ */
+function updatePushSubscriptionUI() {
+  const badge = document.getElementById("pushSubscriptionBadge");
+  const testBtn = document.getElementById("btnSendTestPush");
+  const disableBtn = document.getElementById("btnDisablePush");
+  const reqBtn = document.getElementById("btnRequestBrowserPermission");
+  const descEl = document.getElementById("notificationPermissionDesc");
+
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+    if (badge) {
+      badge.textContent = "Push: Unsupported";
+      badge.className = "badge bg-secondary rounded-pill small";
+    }
+    if (testBtn) testBtn.classList.add("d-none");
+    if (disableBtn) disableBtn.classList.add("d-none");
+    return;
+  }
+
+  const isPermGranted = (typeof Notification !== "undefined" && Notification.permission === "granted");
+
+  if (currentPushSubscription && isPermGranted) {
+    if (badge) {
+      badge.textContent = "Push: Subscribed & Active";
+      badge.className = "badge bg-success rounded-pill small";
+    }
+    if (reqBtn) reqBtn.classList.add("d-none");
+    if (testBtn) testBtn.classList.remove("d-none");
+    if (disableBtn) disableBtn.classList.remove("d-none");
+    if (descEl) {
+      descEl.textContent = "Real mobile push notifications are active! You will receive OS alerts when habits are due, even when StreakLab is closed.";
+    }
+  } else if (!isPushConfiguredOnServer) {
+    if (badge) {
+      badge.textContent = "Push: Server Keys Needed";
+      badge.className = "badge bg-warning text-dark rounded-pill small";
+    }
+    if (reqBtn) {
+      reqBtn.classList.remove("d-none");
+      reqBtn.disabled = false;
+    }
+    if (testBtn) testBtn.classList.add("d-none");
+    if (disableBtn) disableBtn.classList.add("d-none");
+    if (descEl && isPermGranted) {
+      descEl.textContent = "Browser permission granted. To receive real mobile push when closed, configure VAPID keys on Vercel.";
+    }
+  } else {
+    if (badge) {
+      badge.textContent = "Push: Inactive";
+      badge.className = "badge bg-secondary-subtle text-secondary rounded-pill small";
+    }
+    if (reqBtn) {
+      reqBtn.classList.remove("d-none");
+      reqBtn.disabled = false;
+      reqBtn.innerHTML = `<i class="bi bi-bell-fill me-1"></i>Enable Mobile Push`;
+    }
+    if (testBtn) testBtn.classList.add("d-none");
+    if (disableBtn) disableBtn.classList.add("d-none");
+  }
+}
+
+/**
+ * Subscribes user device to Web Push notifications.
+ */
+async function subscribeDeviceToPush() {
+  if (!("Notification" in window)) {
+    showToast("Web Notifications are not supported in this browser.", "warning");
+    return;
+  }
+
+  const reqBtn = document.getElementById("btnRequestBrowserPermission");
+  if (reqBtn) {
+    reqBtn.disabled = true;
+    reqBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span>Subscribing...`;
+  }
+
+  try {
+    // 1. Explicitly request notification permission
+    const permission = await Notification.requestPermission();
+    updateNotificationPermissionUI(permission);
+
+    if (permission !== "granted") {
+      showToast("Notification permission was not granted.", "warning");
+      if (reqBtn) {
+        reqBtn.disabled = false;
+        reqBtn.innerHTML = `<i class="bi bi-bell-fill me-1"></i>Enable Mobile Push`;
+      }
+      return;
+    }
+
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
+      showToast("In-browser notifications enabled (PushManager not supported on this device/browser).", "info");
+      return;
+    }
+
+    // 2. Fetch latest push status & VAPID key from backend
+    const statusRes = await fetch("/api/push/status");
+    if (!statusRes.ok) throw new Error("Could not contact push status endpoint");
+    const statusData = await statusRes.json();
+    backendVapidPublicKey = statusData.vapid_public_key;
+    isPushConfiguredOnServer = Boolean(statusData.is_configured);
+
+    if (!backendVapidPublicKey) {
+      showToast("Browser notifications enabled. Server VAPID keys not configured yet for background push.", "info");
+      updatePushSubscriptionUI();
+      return;
+    }
+
+    // 3. Register push subscription with the browser Push service
+    const reg = await navigator.serviceWorker.ready;
+    const applicationServerKey = urlBase64ToUint8Array(backendVapidPublicKey);
+
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: applicationServerKey
+      });
+    }
+
+    currentPushSubscription = sub;
+
+    // 4. Send subscription to Flask backend
+    const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const subRes = await fetch("/api/push/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        subscription: sub.toJSON(),
+        timezone: userTz,
+        user_agent: navigator.userAgent
+      })
+    });
+
+    if (!subRes.ok) {
+      const err = await subRes.json().catch(() => ({}));
+      throw new Error(err.error || `Server returned ${subRes.status}`);
+    }
+
+    showToast("Real Mobile Push enabled! 🔔 You'll receive alerts even when StreakLab is closed.", "success");
+    updatePushSubscriptionUI();
+
+  } catch (err) {
+    console.error("Failed to subscribe device to push:", err);
+    showToast(`Could not enable push: ${err.message}`, "danger");
+  } finally {
+    if (reqBtn) {
+      reqBtn.disabled = false;
+      reqBtn.innerHTML = `<i class="bi bi-bell-fill me-1"></i>Enable Mobile Push`;
+    }
+  }
+}
+
+/**
+ * Disables Web Push subscription for this device.
+ */
+async function disableDevicePush() {
+  const disableBtn = document.getElementById("btnDisablePush");
+  if (disableBtn) {
+    disableBtn.disabled = true;
+    disableBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span>Disabling...`;
+  }
+
+  try {
+    if (currentPushSubscription) {
+      const endpoint = currentPushSubscription.endpoint;
+      try {
+        await currentPushSubscription.unsubscribe();
+      } catch (unsubErr) {
+        console.warn("Browser unsubscribe returned:", unsubErr);
+      }
+      currentPushSubscription = null;
+
+      // Tell backend to remove
+      await fetch("/api/push/unsubscribe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ endpoint: endpoint })
+      });
+    }
+
+    showToast("Push notifications disabled for this device.", "info");
+    updatePushSubscriptionUI();
+  } catch (err) {
+    console.error("Error unsubscribing push:", err);
+    showToast(`Could not disable push: ${err.message}`, "danger");
+  } finally {
+    if (disableBtn) {
+      disableBtn.disabled = false;
+      disableBtn.innerHTML = `<i class="bi bi-bell-slash me-1"></i>Disable Push`;
+    }
+  }
+}
+
+/**
+ * Triggers a test push notification from the server to this device.
+ */
+async function triggerTestPushNotification() {
+  const testBtn = document.getElementById("btnSendTestPush");
+  if (testBtn) {
+    testBtn.disabled = true;
+    testBtn.innerHTML = `<span class="spinner-border spinner-border-sm me-1" role="status"></span>Sending...`;
+  }
+
+  try {
+    const res = await fetch("/api/push/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({})
+    });
+
+    const data = await res.json().catch(() => ({}));
+    if (res.ok && data.sent > 0) {
+      showToast("Test push sent! 🚀 Check your phone lock screen or notification center.", "success");
+    } else if (res.ok && data.sent === 0) {
+      showToast("No active push subscription found on server. Try tapping 'Enable Mobile Push'.", "warning");
+    } else {
+      throw new Error(data.error || `Server error (${res.status})`);
+    }
+  } catch (err) {
+    console.error("Test push failed:", err);
+    showToast(`Test push failed: ${err.message}`, "danger");
+  } finally {
+    if (testBtn) {
+      testBtn.disabled = false;
+      testBtn.innerHTML = `<i class="bi bi-send-fill me-1"></i>Send Test Push`;
+    }
+  }
 }
 
 /**
@@ -3296,6 +3675,9 @@ async function requestBrowserNotificationPermission() {
   if (currentPerm === "granted") {
     updateNotificationPermissionUI("granted");
     showToast("Browser notifications are already enabled! 🔔", "success");
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      subscribeDeviceToPush();
+    }
     return;
   }
   if (currentPerm === "denied") {
@@ -3348,6 +3730,9 @@ async function requestBrowserNotificationPermission() {
       });
     } catch (e) {
       console.warn("Could not dispatch welcome notification:", e);
+    }
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      subscribeDeviceToPush();
     }
   } else if (result === "denied") {
     showToast("Notifications were blocked. In-app dashboard banners will be used instead.", "info");
@@ -3412,7 +3797,8 @@ async function loadRemindersList() {
  * Opens reminder configuration modal for a specific habit.
  */
 function openReminderModal(habitId) {
-  const habit = habits.find(h => h.id === habitId);
+  if (habitId === undefined || habitId === null) return;
+  const habit = habits.find(h => Number(h.id) === Number(habitId) || String(h.id) === String(habitId));
   if (!habit) return;
 
   const idInput = document.getElementById("reminderHabitIdInput");
@@ -3425,7 +3811,7 @@ function openReminderModal(habitId) {
   if (idInput) idInput.value = habit.id;
   if (nameDisplay) nameDisplay.textContent = habit.name;
 
-  const existingRem = habit.reminder || configuredReminders.find(r => r.habit_id === habitId);
+  const existingRem = habit.reminder || configuredReminders.find(r => Number(r.habit_id) === Number(habitId) || String(r.habit_id) === String(habitId));
 
   if (existingRem) {
     if (timeInput) timeInput.value = existingRem.reminder_time || "08:00";

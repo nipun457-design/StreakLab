@@ -34,6 +34,17 @@
 
   <!-- Custom Stylesheet served via Flask's static folder -->
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+
+  <!-- Progressive Web App (PWA) Manifest & Mobile Configuration -->
+  <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+  <meta name="theme-color" content="#4f46e5">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="StreakLab">
+  <link rel="apple-touch-icon" href="{{ url_for('static', filename='icons/icon-192.png') }}">
+  <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='icons/icon.svg') }}">
+  <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icons/icon-192.png') }}">
 </head>
 <body>
 
@@ -825,40 +836,90 @@
             </div>
 
             <div class="card-body px-4 pb-4 pt-2">
-              <!-- Permission Status Banner -->
+              <!-- Push & Permission Status Banner -->
               <div class="card border-0 bg-light rounded-3 p-3 mb-4">
-                <div class="d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-3">
-                  <div class="d-flex align-items-center gap-3">
-                    <div class="metric-icon-box bg-white border notification-status-icon-box" id="notificationStatusIconBox">
-                      <i class="bi bi-bell text-muted notification-status-icon" id="notificationStatusIcon"></i>
-                    </div>
-                    <div>
-                      <div class="d-flex align-items-center gap-2 mb-1">
-                        <strong class="text-dark small">Browser Notification Permission</strong>
-                        <span class="badge bg-secondary rounded-pill small notification-permission-badge" id="notificationPermissionBadge">Checking...</span>
+                <div class="d-flex flex-column gap-3">
+                  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2">
+                    <div class="d-flex align-items-center gap-3">
+                      <div class="metric-icon-box bg-white border notification-status-icon-box" id="notificationStatusIconBox">
+                        <i class="bi bi-bell text-muted notification-status-icon" id="notificationStatusIcon"></i>
                       </div>
-                      <p class="text-muted fs-xxs mb-0 notification-permission-desc" id="notificationPermissionDesc">
-                        Browser notifications alert you at scheduled habit times.
-                      </p>
+                      <div>
+                        <div class="d-flex align-items-center gap-2 mb-1 flex-wrap">
+                          <strong class="text-dark small">Real Mobile Push Notifications</strong>
+                          <span class="badge bg-secondary rounded-pill small notification-permission-badge" id="notificationPermissionBadge">Checking...</span>
+                          <span class="badge bg-secondary-subtle text-secondary rounded-pill small" id="pushSubscriptionBadge">Push: Initializing</span>
+                        </div>
+                        <p class="text-muted fs-xxs mb-0 notification-permission-desc" id="notificationPermissionDesc">
+                          Receive operating-system notifications on your phone even when StreakLab is closed.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                  <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission" id="btnRequestBrowserPermission">
-                    <i class="bi bi-bell-fill me-1"></i>Enable Notifications
-                  </button>
+
+                  <!-- Push Action Buttons -->
+                  <div class="d-flex align-items-center gap-2 flex-wrap pt-2 border-top">
+                    <button type="button" class="btn btn-sm btn-primary rounded-pill px-3 py-2 flex-shrink-0 btn-request-browser-permission" id="btnRequestBrowserPermission">
+                      <i class="bi bi-bell-fill me-1"></i>Enable Mobile Push
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-primary rounded-pill px-3 py-2 flex-shrink-0 d-none" id="btnSendTestPush">
+                      <i class="bi bi-send-fill me-1"></i>Send Test Push
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-danger rounded-pill px-3 py-2 flex-shrink-0 d-none" id="btnDisablePush">
+                      <i class="bi bi-bell-slash me-1"></i>Disable Push
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              <!-- Browser Notification Limitations -->
+              <!-- Mobile PWA Installation Guide (Collapsible/Informative) -->
+              <div class="card border-0 bg-indigo-subtle text-indigo rounded-3 p-3 mb-4 small">
+                <div class="d-flex align-items-start gap-2">
+                  <i class="bi bi-phone-fill fs-5 text-indigo flex-shrink-0 mt-1"></i>
+                  <div>
+                    <h6 class="fw-bold mb-1 text-indigo">Install on Your Phone for Background Notifications</h6>
+                    <p class="mb-2 fs-xxs text-dark">
+                      Web Push notifications can wake your device and alert you at scheduled times without keeping the website open.
+                    </p>
+                    <div class="row g-2 fs-xxs text-dark">
+                      <div class="col-12 col-md-6">
+                        <div class="p-2 rounded bg-white bg-opacity-75 border border-indigo-subtle h-100">
+                          <strong class="d-block text-dark mb-1"><i class="bi bi-apple me-1"></i>iPhone &amp; iPad (iOS 16.4+)</strong>
+                          <ol class="mb-0 ps-3">
+                            <li>Open StreakLab in <strong>Safari</strong>.</li>
+                            <li>Tap the <strong>Share</strong> button (box with upward arrow).</li>
+                            <li>Select <strong>Add to Home Screen</strong>.</li>
+                            <li>Open StreakLab from your Home Screen and tap <strong>Enable Mobile Push</strong>.</li>
+                          </ol>
+                        </div>
+                      </div>
+                      <div class="col-12 col-md-6">
+                        <div class="p-2 rounded bg-white bg-opacity-75 border border-indigo-subtle h-100">
+                          <strong class="d-block text-dark mb-1"><i class="bi bi-android2 me-1"></i>Android (Chrome, Edge, Firefox)</strong>
+                          <ol class="mb-0 ps-3">
+                            <li>Tap the browser menu <strong>(⋮)</strong>.</li>
+                            <li>Tap <strong>Install App</strong> or <strong>Add to Home screen</strong>.</li>
+                            <li>Tap <strong>Enable Mobile Push</strong> and allow notifications.</li>
+                          </ol>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Browser Notification Limitations & How Reminders Work -->
               <div class="alert alert-info border-info-subtle rounded-3 p-3 mb-4 small">
                 <h6 class="fw-bold mb-1 text-dark d-flex align-items-center gap-2">
                   <i class="bi bi-info-circle-fill text-primary"></i>
                   How StreakLab Reminders Work
                 </h6>
                 <p class="mb-2 text-muted fs-xxs">
-                  StreakLab uses the standard Web Notifications API. For notifications to arrive reliably:
+                  StreakLab supports both in-browser alerts and native mobile Web Push:
                 </p>
                 <ul class="mb-0 ps-3 text-muted fs-xxs">
-                  <li><strong>Tab Activity:</strong> Standard browser notifications require StreakLab to be open or active in a browser tab.</li>
+                  <li><strong>Tab Activity:</strong> Standard in-browser notifications require StreakLab to be open or active in a browser tab.</li>
+                  <li><strong>Mobile Web Push:</strong> When installed as a mobile app (PWA), notifications are delivered through the push service to your operating system.</li>
                   <li><strong>In-App Alert:</strong> If notifications are disabled or unsupported, timely in-app alert banners appear automatically.</li>
                   <li><strong>Duplicate Prevention:</strong> Reminders are automatically suppressed once a habit is completed for today.</li>
                 </ul>

@@ -1,5 +1,8 @@
 # StreakLab — Habit Pattern Detector Dependencies
-# Phase 2A: Flask Backend Foundation
+# Production dependencies for Vercel, PostgreSQL, and Web Push notifications
 
-# Flask is a lightweight WSGI web application framework for Python
 Flask>=3.0.0,<4.0.0
+pg8000>=1.31.0
+pywebpush>=2.0.0
+cryptography>=40.0.0
+py-vapid>=1.9.0

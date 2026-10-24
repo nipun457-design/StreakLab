@@ -30,12 +30,13 @@ StreakLab pairs real-time daily habit tracking with an intelligent **Rule-Based 
 
 | Layer | Technologies | Purpose |
 | :--- | :--- | :--- |
-| **Frontend** | HTML5, Vanilla ES6 JavaScript, Bootstrap 5.3, Bootstrap Icons, Chart.js | 7-section single-page application (SPA), modal forms, Chart.js graphs, floating AI chatbox, XSS-safe DOM rendering |
+| **Frontend** | HTML5, Vanilla ES6 JavaScript, Bootstrap 5.3, Bootstrap Icons, Chart.js | 7-section single-page application (SPA), modal forms, Chart.js graphs, floating AI chatbox, XSS-safe DOM rendering, PWA Manifest |
 | **Backend** | Python 3.14+, Flask 3.1+ | RESTful API, request validation, sliding-window rate limiting, contextual database connection management (`g.db`), Vercel WSGI support |
-| **Database** | SQLite 3 (`instance/streaklab.db` locally, `/tmp/streaklab.db` on Vercel) | ACID persistence, foreign key enforcement (`PRAGMA foreign_keys = ON`), automatic non-destructive column migrations, UPSERT conflict handling |
+| **Database** | PostgreSQL (Production via Neon / Supabase / Vercel Postgres using `pg8000`) & SQLite 3 (Local dev & test fallback) | ACID persistence, unified query parameterization (`?` auto-translated to `%s`), self-healing schema across 7 tables, automated migration utilities |
+| **Push Service** | Standards-based W3C Web Push (`pywebpush`, `py-vapid`), Service Worker (`/sw.js`) | Genuine mobile OS push notifications when website is closed, VAPID encryption, duplicate notification suppression, expired endpoint pruning |
 | **Statistical Engine** | Python (`pattern_engine.py`) | **Source of Truth**: Best streaks, active completion rates, weekday drop-offs, peak days, consecutive misses, progress reports |
-| **AI Habit Coach** | Python (`ai_explainer.py`), Google Gemini / OpenAI APIs | Conversational habit coaching grounded in SQLite data, prompt injection defense, sliding-window IP rate limiter, deterministic offline fallback |
-| **Automated Testing**  | Python `unittest`, `unittest.mock` (`test_app.py`) | 107 isolated automated unit and integration tests using temporary SQLite databases (100% mocked AI) |
+| **AI Habit Coach** | Python (`ai_explainer.py`), Google Gemini / OpenAI APIs | Conversational habit coaching grounded in database evidence, prompt injection defense, sliding-window IP rate limiter, deterministic offline fallback |
+| **Automated Testing**  | Python `unittest`, `unittest.mock` (`test_app.py`) | 125 isolated automated unit and regression tests passing with 100% mocked AI and push services |
 
 ---
 
@@ -450,71 +451,146 @@ OK
    - **Settings**: Browser notification permissions, active reminder schedule management, and CSV data exports.
 4. **Browser Notifications & In-App Alert Fallback**:
    - Click **Reminders** in the top navigation bar to open the Notification Settings modal.
-   - Observe the live permission badge: `Not Requested Yet`, `Checking...`, `Notifications Enabled` (Granted), `Blocked in Browser` (Denied), or `Unsupported in Browser`.
-   - Click **Enable Notifications** to trigger the browser prompt on explicit user gesture.
-   - If browser notifications are disabled or the tab is blurred, prominent in-app alert banners automatically appear at the scheduled minute.
-5. **CSV Data Export Center**:
-   - Download UTF-8 BOM CSV files for Habits, Check-in Records, Goals & Milestones, and Progress Reports with built-in formula injection defenses.
-6. **Conversational AI Habit Coach**:
-   - Click the floating robot icon or top navbar **AI Coach** button to chat about your routines, slumps, or upcoming goals.
+   - Observe the live permission badge: `Not Requested Yet`, `Checking...`, `Notifications Enabled` (Granted), `Blocked in Browser` (## 🛠️ Root Cause Investigations & Architecture Upgrades
+
+### 1. Priority 1 — Habits Disappearing Bug (Data Loss on Vercel)
+* **Root Cause**: Vercel Serverless Functions execute inside ephemeral micro-VM containers. In previous deployments, writing to SQLite at `/tmp/streaklab.db` appeared to work during a single request session. However, `/tmp` in serverless is temporary and isolated per execution instance:
+  - When the serverless function cold-starts or idles, the container is destroyed along with its `/tmp` filesystem.
+  - When multiple requests route to different concurrent container instances, each instance sees a distinct, empty database file.
+* **Fix & Architecture**:
+  - Implemented a unified database layer (`database.py`) providing automatic abstraction between **PostgreSQL** in production and **SQLite** locally.
+  - StreakLab detects `DATABASE_URL`, `POSTGRES_URL`, or `POSTGRES_PRISMA_URL` in the environment.
+  - Automatically translates `?` parameter placeholders to PostgreSQL `%s` syntax while enforcing parameterized queries to prevent SQL injection.
+  - Self-healing schema: auto-initializes all 7 tables with proper indexes (`idx_records_habit_date`, `idx_reminders_habit`, `idx_push_endpoint`, `idx_notif_habit_date`).
+  - Zero-data-loss SQLite-to-PostgreSQL migration utilities (`python database.py --migrate` or `POST /api/admin/migrate-sqlite`).
+
+### 2. Priority 2 — Edit Habit Bug ("Habit Not Found")
+* **Root Cause**:
+  1. **Strict Type Mismatch in Frontend**: `static/script.js` was comparing `Number(h.id) === Number(habitId)`, but some habit IDs were rendered as strings from form inputs, causing in-memory state lookup or select prefill to fail.
+  2. **Frequency Capitalization Desync**: HTML select elements had capitalized values (`Daily`, `Weekdays`, `Weekends`), whereas database defaults stored lowercase (`daily`), causing option selection to fail to bind on modal open.
+  3. **Database Connection Isolation**: In serverless instances without self-healing tables, separate routes could query unmigrated tables.
+* **Fix**:
+  - Synchronized frontend ID casting to `Number(h.id) === Number(habitId) || String(h.id) === String(habitId)`.
+  - Added case-insensitive frequency normalizer in both frontend and backend.
+  - Unified `PUT /api/habits/<int:habit_id>` endpoint updates habits in-place and synchronizes `habit_reminders` atomically without creating duplicate rows.
+
+### 3. Priority 3 — Real Mobile Web Push Notifications
+* **Architecture**:
+  - **PWA Installation**: Implemented Web App Manifest (`static/manifest.json`), responsive icons (`static/icons/`), and root service worker (`static/sw.js`).
+  - **Explicit User Interaction**: Permission is requested only after clicking "Enable Mobile Push" (never unprompted on page load).
+  - **VAPID Security**: Server-side Web Push delivery via `push_service.py` using `pywebpush` and `py-vapid`. Public key is safely exposed via `GET /api/push/status`; private key remains securely in server environment variables.
+  - **Background Serverless Scheduler**: Does not rely on Flask background threads (which terminate immediately upon serverless response completion). Reminders are checked via `GET /api/cron/reminders`, securely configured as a Vercel Cron Job (`* * * * *`) and authenticated with `CRON_SECRET`.
+  - **Duplicate Prevention**: Every sent notification logs an immutable event in `habit_notification_logs (habit_id, notification_date)`. If a habit is already completed for today or was already notified, delivery is automatically suppressed.
+  - **Expired Subscriptions Pruning**: When browser push services return HTTP 404 or 410 (Gone), expired endpoints are automatically deactivated from `push_subscriptions`.
 
 ---
 
-## ⚠️ Browser Realities, Background Push & Serverless Deployment
+## 📱 Mobile Compatibility & Setup Guide
 
-### 1. Browser Notification Execution Context & Honesty
-- Standard browser Web Notifications (`Notification.requestPermission()` and `new Notification()`) run inside the browser tab context.
-- **Tab Activity Requirement**: In standard web browsers, client-side JavaScript timers (`setInterval` / `setTimeout`) only fire while the browser has an open or backgrounded tab running the application. Ordinary web page JavaScript cannot execute when the browser application is completely closed.
-- StreakLab transparently informs users of this requirement and provides an automatic **in-app banner alert** fallback so users never miss a reminder while actively using the application.
+### iPhone & iPad (iOS / iPadOS 16.4+)
+* **Requirement**: Apple requires web applications to be added to the iOS Home Screen before Web Push notifications can be granted permission or received in the background.
+* **Installation Steps**:
+  1. Open StreakLab in **Safari**.
+  2. Tap the **Share** button (square with arrow pointing up).
+  3. Scroll down and tap **Add to Home Screen**.
+  4. Launch StreakLab from your Home Screen icon.
+  5. Go to **Settings & Data Management** and tap **Enable Mobile Push**.
+  6. Tap **Allow** when iOS prompts for notification permissions.
 
-### 2. Reliable Background Notifications via Web Push & VAPID (Optional Production Architecture)
-To deliver persistent background reminders when the browser tab or entire web browser is closed, the application requires the W3C Push API, a Service Worker, and a Web Push protocol server:
+### Android (Chrome, Edge, Firefox, Brave)
+* **Installation Steps**:
+  1. Open StreakLab in your browser.
+  2. Tap the browser menu `(⋮)` and select **Install App** or **Add to Home screen**.
+  3. Go to **Settings** and tap **Enable Mobile Push**.
+  4. Tap **Allow** when the system prompt appears.
 
-1. **Service Worker**: A registered background service worker (`sw.js`) that listens for `push` events and displays notifications via `self.registration.showNotification()`.
-2. **VAPID Key Pair**: Voluntary Application Server Identification (VAPID) credentials generated using `pywebpush`:
-   ```bash
-   pip install pywebpush
-   python -c "from pywebpush import webpush; import json; print(json.dumps(webpush.generate_vapid_keypair()))"
-   ```
-3. **Environment-Only Secrets Configuration**:
-   ```ini
-   VAPID_PUBLIC_KEY=BK...
-   VAPID_PRIVATE_KEY=your_vapid_private_key_secret_here
-   VAPID_CLAIM_EMAIL=mailto:admin@streaklab.app
-   ```
-4. **Strict Security Requirement**:
-   - `VAPID_PRIVATE_KEY`, API secrets, and server configuration must **never** be exposed in frontend JavaScript, templates, or committed to GitHub repositories.
-   - Only `VAPID_PUBLIC_KEY` is shared with client-side `pushManager.subscribe()`.
-5. **Persistent Background Scheduler**: A persistent background task runner (e.g., Celery with Redis, APScheduler worker, or cron-triggered webhook) queries scheduled reminders each minute and transmits encrypted Web Push payloads to the browser vendor's push service (e.g. Mozilla autopush, Google FCM).
+---
 
-### 3. Vercel Serverless Deployment Safety
-- **Read-Only Filesystem**: Serverless runtimes on Vercel mount the application directory (`/var/task`) as read-only. Attempting to create folders or write SQLite databases in `/var/task/instance/` produces an immediate `OSError: [Errno 30] Read-only file system` error.
-- **Configurable Database Path**: In `app.py`, `get_database_path()` dynamically checks `os.environ.get('VERCEL')`. When running in Vercel serverless mode, it automatically resolves to `/tmp/streaklab.db` before any directory creation or database connection:
-  ```python
-  if os.environ.get('VERCEL') or os.environ.get('AWS_LAMBDA_FUNCTION_NAME'):
-      return '/tmp/streaklab.db'
-  ```
-- **Local Consistency**: In local development, StreakLab continues using the project directory `instance/streaklab.db`.
+## 🚀 Production Deployment & Manual Configuration Steps
+
+To deploy StreakLab to Vercel with persistent PostgreSQL storage and real Web Push notifications, follow these exact steps:
+
+### Step 1: Provision a Persistent PostgreSQL Database
+Create a free PostgreSQL database on any managed cloud provider:
+* **Option A: Neon (Recommended)**: Go to [neon.tech](https://neon.tech), create a project, and copy the `postgres://...` connection string.
+* **Option B: Supabase**: Go to [supabase.com](https://supabase.com), create a project, and copy the Connection String (URI, pooling port 5432 or 6543).
+* **Option C: Vercel Postgres**: In your Vercel Project Dashboard, navigate to the **Storage** tab, create a Postgres database, and link it.
+
+### Step 2: Generate VAPID Push Notification Credentials
+Run the following Python one-liner locally to generate your cryptographic VAPID keypair:
+```powershell
+.\.venv\Scripts\python.exe -c "import push_service, json; print(json.dumps(push_service.generate_vapid_keypair(), indent=2))"
+```
+Output:
+```json
+{
+  "public_key": "BEl...",
+  "private_key": "ABC..."
+}
+```
+
+### Step 3: Configure Vercel Environment Variables
+In your Vercel Project Dashboard, navigate to **Settings** > **Environment Variables** and add:
+
+| Variable Name | Example Value | Description |
+| :--- | :--- | :--- |
+| `DATABASE_URL` | `postgresql://user:pass@ep-xyz.neon.tech/neondb?sslmode=require` | Persistent PostgreSQL database connection string |
+| `VAPID_PUBLIC_KEY` | `BEl...` (from Step 2) | Application Server Public Key for browser subscription |
+| `VAPID_PRIVATE_KEY` | `ABC...` (from Step 2) | Server-side private key (kept secret) |
+| `VAPID_CLAIM_EMAIL` | `mailto:your-email@domain.com` | Contact URI for push delivery services |
+| `CRON_SECRET` | `generate-any-secure-random-token` | Bearer token to protect scheduled reminder trigger |
+| `GEMINI_API_KEY` | *(Optional)* | For AI Habit Coach provider |
+
+### Step 4: Configure the Push Reminder Scheduler
+StreakLab includes a preconfigured Vercel Cron trigger in `vercel.json`:
+```json
+{
+  "crons": [
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "* * * * *"
+    }
+  ]
+}
+```
+* **Vercel Pro Plans**: Vercel Cron automatically runs every minute and supplies `Authorization: Bearer <CRON_SECRET>`.
+* **Vercel Hobby / External Schedulers**: Set up a free recurring cron monitor on [cron-job.org](https://cron-job.org) or [updown.io](https://updown.io) targeting:
+  - **URL**: `https://your-streaklab.vercel.app/api/cron/reminders`
+  - **Interval**: Every 1 minute (or every 5 minutes)
+  - **Header**: `Authorization: Bearer <your-CRON_SECRET>` (or `x-cron-secret: <your-CRON_SECRET>`)
+
+### Step 5: (Optional) Migrate Existing Local SQLite Records to PostgreSQL
+If you have existing habits in your local SQLite database and wish to transfer them into PostgreSQL without data loss:
+```powershell
+# Set your production DATABASE_URL in your local shell session
+$env:DATABASE_URL="postgresql://user:pass@ep-xyz.neon.tech/neondb?sslmode=require"
+
+# Run the automated migration script
+.\.venv\Scripts\python.exe database.py --migrate
+```
+All habits, check-in history, goals, milestones, reminders, and push subscriptions will be imported with preserved primary keys.
 
 ---
 
 ## 📚 Supplementary Documentation
 
-* **[Architecture Document](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/ARCHITECTURE.md)**: System flow diagrams, component boundaries, schema tables (`habits`, `habit_records`, `habit_reminders`, `habit_goals`, `goal_milestones`), security model, and formula injection defense.
-* **[Testing Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/TESTING.md)**: Full test matrix (107 test cases), isolation details, mock specifications, and manual verification checklist.
+* **[Architecture Document](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/ARCHITECTURE.md)**: System flow diagrams, component boundaries, schema tables (`habits`, `habit_records`, `habit_reminders`, `habit_goals`, `goal_milestones`, `push_subscriptions`, `habit_notification_logs`), security model, and formula injection defense.
+* **[Testing Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/TESTING.md)**: Full test matrix (125 test cases), isolation details, mock specifications, and manual verification checklist.
 * **[Demo Presentation Guide](file:///c:/Users/nipun/OneDrive/Desktop/StreakLab/docs/DEMO_GUIDE.md)**: Step-by-step live demonstration script covering Reminders, Goals, Progress Reports, CSV Export, AI Chatbox, and Calendar Heatmap.
 
 ---
 
 ## 📅 Development Roadmap Status
 
-- [x] **Foundation & Diagnostics**: Flask backend foundation, SQLite database integration (`instance/streaklab.db`), RESTful API endpoints, streak calculation, and `/api/health` diagnostic endpoint.
+- [x] **Foundation & Diagnostics**: Flask backend foundation, RESTful API endpoints, streak calculation, and `/api/health` diagnostic endpoint.
+- [x] **Persistent Cloud Storage (Priority 1)**: Unified database abstraction layer (`database.py`) supporting PostgreSQL in production and SQLite locally, self-healing schema across 7 tables, automated migration utilities.
+- [x] **Habit Edit Bug Fix (Priority 2)**: Record ID type normalization, frequency case insensitivity, atomic in-place updates, and reminder synchronization.
+- [x] **Real Mobile Web Push (Priority 3)**: Standards-based Web Push, service worker `/sw.js`, PWA manifest, VAPID encryption, duplicate notification suppression, and iOS/Android instructions.
 - [x] **Behavioral Pattern Engine**: Rule-based habit pattern detection engine (`pattern_engine.py`), `/api/insights`, `/api/analytics`, configurable window selector, and statistical metrics.
-- [x] **Hybrid AI Explanations**: Evidence-grounded explanations and recommendations (`ai_explainer.py`), Gemini and OpenAI integrations, local deterministic fallback, and `/api/insights/explanations`.
-- [x] **Real AI Habit Coach Chatbox**: Conversational AI Coach (`/api/chat`), floating frontend chatbox with suggestion chips, DOM-safe rendering, evidence grounding, and sliding-window rate limiting.
-- [x] **Progress & Goal Tracking**: Habit Calendar Heatmap (`/api/calendar`), Weekly Progress Review (`/api/reviews/weekly`), Goals & Milestones (`/api/goals`), and duplicate-prevented badge celebrations.
-- [x] **Automatic Habit Reminders**: Reminder time selection and default-ON toggle during habit creation, 1-to-1 persistence in `habits` and `habit_reminders`, edit time & toggle controls, local time scheduling, and automatic silence on habit completion/deletion.
-- [x] **Organized 7-Section Product UI**: Dedicated views (Overview, My Habits, Calendar, Insights, Goals, Reports, Settings), unified 4-card metric summary, prominent Add Habit trigger, and elimination of development-phase jargon.
+- [x] **Hybrid AI Explanations & Coach**: Evidence-grounded explanations (`ai_explainer.py`), conversational AI Coach (`/api/chat`), and sliding-window rate limiting.
+- [x] **Progress & Goal Tracking**: Habit Calendar Heatmap (`/api/calendar`), Weekly Progress Review (`/api/reviews/weekly`), Goals & Milestones (`/api/goals`).
+- [x] **Multi-Period Reports & CSV Export**: Daily, weekly, and monthly reports (`/api/reports`), UTF-8 BOM CSV exports (`/api/export`) protected against formula injection (`=+-@\t\r`).
+- [x] **Automated Test Suite (Priority 5)**: 125 isolated automated unit and regression tests passing with 100% mocked AI and push services. views (Overview, My Habits, Calendar, Insights, Goals, Reports, Settings), unified 4-card metric summary, prominent Add Habit trigger, and elimination of development-phase jargon.
 - [x] **Multi-Period Reports & CSV Export**: Daily, weekly, and monthly reports (`/api/reports`), UTF-8 BOM CSV exports (`/api/export`) protected against formula injection (`=+-@\t\r`).
 - [x] **Vercel Serverless Safety**: Dynamic `/tmp/streaklab.db` path resolution, eliminating read-only filesystem errors.
 - [x] **Automated Test Suite**: 107 isolated automated unit and integration tests passing with 100% mocked AI and temporary database fixtures.

@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4f46e5" />
+      <stop offset="100%" stop-color="#312e81" />
+    </linearGradient>
+    <linearGradient id="flameGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#ea580c" />
+      <stop offset="60%" stop-color="#f97316" />
+      <stop offset="100%" stop-color="#fbbf24" />
+    </linearGradient>
+    <linearGradient id="coreGrad" x1="0%" y1="100%" x2="0%" y2="0%">
+      <stop offset="0%" stop-color="#f59e0b" />
+      <stop offset="100%" stop-color="#fef08a" />
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded App Icon Background -->
+  <rect width="512" height="512" rx="112" fill="url(#bgGrad)" />
+
+  <!-- Outer Flame -->
+  <path d="M 256,72 C 270,140 310,180 340,240 C 375,305 355,395 285,424 C 235,444 185,430 152,388 C 122,348 126,290 162,250 C 180,230 182,210 178,190 C 172,212 165,225 150,242 C 112,284 100,345 125,398 C 158,465 240,490 310,465 C 385,435 422,345 382,265 C 352,205 305,155 282,100 Z" fill="url(#flameGrad)" />
+
+  <!-- Inner Flame Core -->
+  <path d="M 256,220 C 275,260 295,290 290,340 C 285,385 245,410 215,400 C 185,390 175,355 190,325 C 200,305 205,285 200,270 C 205,285 215,300 230,312 C 240,320 255,330 256,345 C 265,335 262,310 250,290 C 242,275 245,250 256,220 Z" fill="url(#coreGrad)" />
+</svg>

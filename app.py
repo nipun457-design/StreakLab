@@ -42,250 +42,36 @@ app = Flask(__name__, template_folder='templates', static_folder='static')
 application = app  # WSGI compatibility for Vercel / serverless runtimes
 
 
+from database import (
+    get_db,
+    close_db,
+    init_db_schema as init_db,
+    is_postgres_configured,
+    get_database_url,
+    get_sqlite_database_path
+)
+import push_service
+
+
 def get_database_path():
-    """
-    Resolves and configures the SQLite database path.
-    1. If DATABASE environment variable is set, it takes top precedence.
-    2. If running on Vercel or any serverless runtime (VERCEL, AWS_LAMBDA, LAMBDA_TASK_ROOT, or /var/task),
-       strictly uses '/tmp/streaklab.db' BEFORE attempting any directory creation or SQLite connection.
-    3. In local development, uses Flask's instance directory 'instance/streaklab.db'.
-    """
-    env_db = os.environ.get('DATABASE')
-    if env_db:
-        return env_db
-
-    # Serverless runtime detection (Vercel, AWS Lambda, or /var/task deployment root)
-    is_serverless = bool(
-        os.environ.get('VERCEL')
-        or os.environ.get('VERCEL_ENV')
-        or os.environ.get('VERCEL_REGION')
-        or os.environ.get('AWS_LAMBDA_FUNCTION_NAME')
-        or os.environ.get('LAMBDA_TASK_ROOT')
-        or os.environ.get('NOW_REGION')
-        or (hasattr(app, 'instance_path') and str(app.instance_path).startswith('/var/task'))
-        or (hasattr(app, 'root_path') and str(app.root_path).startswith('/var/task'))
-    )
-    if is_serverless:
-        resolved = '/tmp/streaklab.db'
-        app.config['DATABASE'] = resolved
-        return resolved
-
-    # Local development: use instance/streaklab.db without premature creation
-    resolved = os.path.join(app.instance_path, 'streaklab.db')
-    app.config['DATABASE'] = resolved
-    return resolved
+    """Returns the resolved SQLite database path (used in local development/tests)."""
+    path = get_sqlite_database_path(app)
+    if app:
+        app.config['DATABASE'] = path
+    return path
 
 
 get_default_database_path = get_database_path
 
-# Set database path inside Flask's configuration
+# Set database path inside Flask configuration
 app.config.setdefault('DATABASE', get_database_path())
 
 
-# ---------------------------------------------------------------------------
-# DATABASE CONNECTION & INITIALIZATION
-# ---------------------------------------------------------------------------
-
-def get_db():
-    """
-    Opens a unique database connection per request if not already open,
-    attaching it to Flask's request-scoped 'g' context.
-    Enforces SQLite foreign key constraints and enables dict-like row access.
-    Uses the exact same resolved database path as init_db().
-    """
-    if 'db' not in g:
-        db_path = app.config.get('DATABASE') or get_database_path()
-        app.config['DATABASE'] = db_path
-
-        if db_path != ':memory:':
-            db_dir = os.path.dirname(os.path.abspath(db_path))
-            if db_dir:
-                try:
-                    os.makedirs(db_dir, exist_ok=True)
-                except (OSError, PermissionError):
-                    db_path = '/tmp/streaklab.db'
-                    app.config['DATABASE'] = db_path
-                    os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-
-        g.db = sqlite3.connect(db_path)
-        g.db.row_factory = sqlite3.Row
-        # Crucial: SQLite turns foreign keys OFF by default per connection
-        g.db.execute("PRAGMA foreign_keys = ON;")
-    return g.db
-
-
 @app.teardown_appcontext
-def close_db(exception=None):
-    """Closes the database connection at the end of each request."""
-    db = g.pop('db', None)
-    if db is not None:
-        db.close()
+def app_close_db(exception=None):
+    """Closes the request-scoped database connection."""
+    close_db(exception)
 
-
-def init_db():
-    """
-    Creates tables and indices in SQLite if they do not already exist.
-    Called automatically on application startup.
-    Ensures both init_db() and all runtime queries use the same resolved database path.
-    """
-    db_path = app.config.get('DATABASE') or get_database_path()
-    app.config['DATABASE'] = db_path
-
-    if db_path != ':memory:':
-        db_dir = os.path.dirname(os.path.abspath(db_path))
-        if db_dir:
-            try:
-                os.makedirs(db_dir, exist_ok=True)
-            except (OSError, PermissionError):
-                db_path = '/tmp/streaklab.db'
-                app.config['DATABASE'] = db_path
-                os.makedirs(os.path.dirname(os.path.abspath(db_path)), exist_ok=True)
-
-    conn = sqlite3.connect(db_path)
-    conn.execute("PRAGMA foreign_keys = ON;")
-    with conn:
-        # Table 1: habits
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS habits (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL,
-                description TEXT,
-                category TEXT,
-                time_of_day TEXT DEFAULT 'Morning',
-                target_time TEXT DEFAULT '08:00 AM',
-                target_frequency TEXT DEFAULT 'daily',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                active INTEGER DEFAULT 1
-            );
-        """)
-
-        # Table 2: habit_records
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS habit_records (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                habit_id INTEGER NOT NULL,
-                record_date TEXT NOT NULL,
-                status TEXT NOT NULL CHECK(status IN ('completed', 'missed', 'skipped')),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
-                UNIQUE (habit_id, record_date)
-            );
-        """)
-
-        # Performance indices for fast queries on habit history and date lookups
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_records_habit_date ON habit_records (habit_id, record_date);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_records_date ON habit_records (record_date);")
-
-        # Table 3: habit_goals (Phase 7 & 8: Weekly, Streak, and Total Targets)
-        # Safe migration if table previously had target_value <= 7 check constraint
-        cur = conn.execute("SELECT sql FROM sqlite_master WHERE type='table' AND name='habit_goals'")
-        goal_table_row = cur.fetchone()
-        if goal_table_row and "target_value <= 7" in goal_table_row[0]:
-            conn.execute("PRAGMA foreign_keys = OFF;")
-            conn.execute("""
-                CREATE TABLE habit_goals_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    habit_id INTEGER NOT NULL,
-                    target_type TEXT NOT NULL DEFAULT 'weekly_completions',
-                    target_value INTEGER NOT NULL CHECK(target_value >= 1),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    active INTEGER DEFAULT 1,
-                    end_date TEXT DEFAULT NULL,
-                    FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
-                    UNIQUE (habit_id, target_type)
-                );
-            """)
-            conn.execute("""
-                INSERT INTO habit_goals_new (id, habit_id, target_type, target_value, created_at, updated_at, active)
-                SELECT id, habit_id, target_type, target_value, created_at, updated_at, active FROM habit_goals;
-            """)
-            conn.execute("DROP TABLE habit_goals;")
-            conn.execute("ALTER TABLE habit_goals_new RENAME TO habit_goals;")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_goals_habit ON habit_goals (habit_id);")
-            conn.execute("PRAGMA foreign_keys = ON;")
-        else:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS habit_goals (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    habit_id INTEGER NOT NULL,
-                    target_type TEXT NOT NULL DEFAULT 'weekly_completions',
-                    target_value INTEGER NOT NULL CHECK(target_value >= 1),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    active INTEGER DEFAULT 1,
-                    end_date TEXT DEFAULT NULL,
-                    FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
-                    UNIQUE (habit_id, target_type)
-                );
-            """)
-            # Ensure end_date column exists if table was created previously without it
-            cols = [r[1] for r in conn.execute("PRAGMA table_info(habit_goals)").fetchall()]
-            if 'end_date' not in cols:
-                conn.execute("ALTER TABLE habit_goals ADD COLUMN end_date TEXT DEFAULT NULL;")
-
-        # Table 4: goal_milestones (Phase 7 & 8: Achieved Milestones & Duplicate Prevention)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS goal_milestones (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                goal_id INTEGER NOT NULL,
-                habit_id INTEGER NOT NULL,
-                milestone_type TEXT NOT NULL,
-                milestone_period TEXT NOT NULL,
-                achieved_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                notified INTEGER DEFAULT 0,
-                FOREIGN KEY (goal_id) REFERENCES habit_goals (id) ON DELETE CASCADE,
-                FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE,
-                UNIQUE (habit_id, milestone_type, milestone_period)
-            );
-        """)
-
-        # Table 5: habit_reminders (Smart Reminders & Notifications)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS habit_reminders (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                habit_id INTEGER NOT NULL UNIQUE,
-                reminder_time TEXT NOT NULL,
-                enabled INTEGER DEFAULT 1,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                FOREIGN KEY (habit_id) REFERENCES habits (id) ON DELETE CASCADE
-            );
-        """)
-
-        # Safe migration for existing habits: ensure columns exist without data loss
-        habit_cols = [r[1] for r in conn.execute("PRAGMA table_info(habits)").fetchall()]
-        if 'reminder_time' not in habit_cols:
-            conn.execute("ALTER TABLE habits ADD COLUMN reminder_time TEXT DEFAULT '08:00';")
-        if 'reminder_enabled' not in habit_cols:
-            conn.execute("ALTER TABLE habits ADD COLUMN reminder_enabled INTEGER DEFAULT 1;")
-
-        # Migrate existing habits: ensure each active habit has a habit_reminders row
-        existing_habits = conn.execute("SELECT id, target_time, reminder_time, reminder_enabled FROM habits").fetchall()
-        for h_row in existing_habits:
-            hid = h_row[0]
-            t_time = str(h_row[1] or "08:00")
-            # Extract 24-hr time if available
-            m24 = re.match(r"^([01]\d|2[0-3]):[0-5]\d", t_time)
-            r_time = h_row[2] or (m24.group(0) if m24 else "08:00")
-            r_en = 1 if (h_row[3] is None or h_row[3] == 1) else 0
-
-            rem_check = conn.execute("SELECT id, reminder_time, enabled FROM habit_reminders WHERE habit_id = ?", (hid,)).fetchone()
-            if not rem_check:
-                conn.execute("""
-                    INSERT INTO habit_reminders (habit_id, reminder_time, enabled)
-                    VALUES (?, ?, ?)
-                """, (hid, r_time, r_en))
-            else:
-                conn.execute("""
-                    UPDATE habits SET reminder_time = ?, reminder_enabled = ? WHERE id = ?
-                """, (rem_check[1], rem_check[2], hid))
-
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_goals_habit ON habit_goals (habit_id);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_milestones_lookup ON goal_milestones (habit_id, milestone_period);")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_reminders_habit ON habit_reminders (habit_id);")
-    conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -476,21 +262,169 @@ def index():
     return render_template('index.html')
 
 
+@app.route('/sw.js')
+def service_worker():
+    """Serves the service worker from the root domain with root scope."""
+    sw_path = os.path.join(app.static_folder, 'sw.js')
+    if not os.path.exists(sw_path):
+        return jsonify({"error": "Service worker not found"}), 404
+    with open(sw_path, 'r', encoding='utf-8') as f:
+        content = f.read()
+    resp = Response(content, mimetype='application/javascript')
+    resp.headers['Service-Worker-Allowed'] = '/'
+    resp.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    return resp
+
+
 @app.route('/api/health', methods=['GET'])
 def health_check():
-    """Diagnostic health check verifying Flask and SQLite database connectivity."""
+    """Diagnostic health check verifying Flask, database, and push notification readiness."""
     db_ok = True
+    storage_engine = "postgresql" if is_postgres_configured() else "sqlite"
     try:
         db = get_db()
         db.execute("SELECT 1").fetchone()
-    except Exception:
+    except Exception as exc:
+        logger.error(f"Health check database failure: {exc}")
         db_ok = False
 
     return jsonify({
         "status": "ok" if db_ok else "error",
         "app": "StreakLab",
-        "database": "connected" if db_ok else "disconnected"
+        "database": "connected" if db_ok else "disconnected",
+        "storage": storage_engine,
+        "push_notifications": {
+            "vapid_configured": push_service.is_vapid_configured()
+        }
     }), 200 if db_ok else 500
+
+
+@app.route('/api/push/status', methods=['GET'])
+def push_status():
+    """Returns VAPID configuration status and the public key for browser subscription."""
+    is_cfg = push_service.is_vapid_configured()
+    pub_key = push_service.get_vapid_public_key()
+    return jsonify({
+        "configured": is_cfg,
+        "is_configured": is_cfg,
+        "publicKey": pub_key,
+        "vapid_public_key": pub_key
+    }), 200
+
+
+@app.route('/api/push/subscribe', methods=['POST'])
+def push_subscribe():
+    """Registers a browser Web Push subscription."""
+    if not request.is_json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+
+    data = request.get_json() or {}
+    subscription = data.get('subscription')
+    if not subscription:
+        return jsonify({"error": "Missing subscription object"}), 400
+
+    tz = data.get('timezone', 'UTC')
+    user_agent = request.headers.get('User-Agent', '')
+
+    try:
+        saved = push_service.save_subscription(get_db(), subscription, user_agent=user_agent, timezone=tz)
+        return jsonify({
+            "status": "subscribed",
+            "message": "Push subscription saved successfully",
+            "subscription": saved
+        }), 201
+    except ValueError as val_err:
+        return jsonify({"error": str(val_err)}), 400
+    except Exception as exc:
+        logger.error(f"Error saving push subscription: {exc}")
+        return jsonify({"error": "Failed to save push subscription"}), 500
+
+
+@app.route('/api/push/unsubscribe', methods=['POST'])
+def push_unsubscribe():
+    """Deactivates a browser Web Push subscription."""
+    data = request.get_json() if request.is_json else {}
+    endpoint = (data or {}).get('endpoint')
+    if not endpoint:
+        return jsonify({"error": "Missing endpoint"}), 400
+
+    push_service.remove_subscription(get_db(), endpoint)
+    return jsonify({
+        "status": "unsubscribed",
+        "message": "Unsubscribed successfully"
+    }), 200
+
+
+@app.route('/api/push/test', methods=['POST'])
+def push_test():
+    """Sends an immediate test push notification to verify device connectivity."""
+    data = request.get_json() if request.is_json else {}
+    endpoint = (data or {}).get('endpoint')
+
+    res = push_service.send_test_push(get_db(), endpoint=endpoint)
+    if res.get('success'):
+        return jsonify({"message": "Test notification sent successfully!", "details": res}), 200
+    else:
+        status_code = 400 if res.get('unconfigured') else 502
+        return jsonify({"error": res.get('error', 'Failed to send test push'), "details": res}), status_code
+
+
+@app.route('/api/cron/reminders', methods=['GET', 'POST'])
+def cron_reminders():
+    """
+    Secure serverless cron trigger for evaluating and dispatching due habit reminders.
+    Authenticates requests using CRON_SECRET via Bearer token, X-Cron-Secret header, or key parameter.
+    """
+    cfg = push_service.get_vapid_config()
+    expected_secret = cfg.get('cron_secret')
+
+    if expected_secret:
+        auth_header = request.headers.get('Authorization', '')
+        bearer_token = auth_header.replace('Bearer ', '').strip() if auth_header.startswith('Bearer ') else ''
+        header_secret = request.headers.get('X-Cron-Secret', '').strip()
+        query_secret = request.args.get('key', '').strip()
+
+        is_authorized = (
+            bearer_token == expected_secret
+            or header_secret == expected_secret
+            or query_secret == expected_secret
+        )
+        if not is_authorized:
+            return jsonify({"error": "Unauthorized: invalid or missing cron secret"}), 401
+
+    try:
+        report = push_service.check_and_send_due_reminders(get_db())
+        return jsonify(report), 200
+    except Exception as exc:
+        logger.error(f"Cron reminder error: {exc}")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route('/api/admin/migrate-sqlite', methods=['POST'])
+def admin_migrate_sqlite():
+    """
+    Administrative endpoint to migrate local SQLite records to PostgreSQL.
+    Protected by CRON_SECRET.
+    """
+    cfg = push_service.get_vapid_config()
+    expected_secret = cfg.get('cron_secret')
+    if expected_secret:
+        auth_header = request.headers.get('Authorization', '')
+        bearer_token = auth_header.replace('Bearer ', '').strip() if auth_header.startswith('Bearer ') else ''
+        if bearer_token != expected_secret and request.headers.get('X-Cron-Secret', '') != expected_secret:
+            return jsonify({"error": "Unauthorized"}), 401
+
+    if not is_postgres_configured():
+        return jsonify({"error": "PostgreSQL is not configured. Set DATABASE_URL first."}), 400
+
+    try:
+        from database import export_sqlite_data, import_data_to_postgres
+        data = export_sqlite_data()
+        res = import_data_to_postgres(data, get_db())
+        return jsonify({"message": "Migration completed", "result": res}), 200
+    except Exception as exc:
+        return jsonify({"error": f"Migration failed: {exc}"}), 500
+
 
 
 # ---------------------------------------------------------------------------
@@ -647,11 +581,11 @@ def update_habit(habit_id):
     else:
         name = existing['name']
 
-    description = data.get('description', existing['description'])
-    category = data.get('category', existing['category'])
-    target_frequency = data.get('target_frequency', data.get('frequency', existing['target_frequency']))
-    time_of_day = data.get('time_of_day', data.get('timeOfDay', existing['time_of_day']))
-    target_time = data.get('target_time', data.get('targetTime', existing['target_time']))
+    description = (data.get('description') if 'description' in data else existing['description']) or ""
+    category = (data.get('category') if 'category' in data else existing['category']) or "General"
+    target_frequency = (data.get('target_frequency') or data.get('frequency') or existing['target_frequency'] or "daily").strip()
+    time_of_day = (data.get('time_of_day') or data.get('timeOfDay') or existing['time_of_day'] or "Morning").strip()
+    target_time = (data.get('target_time') or data.get('targetTime') or existing['target_time'] or "08:00 AM").strip()
     active = data.get('active', existing['active'])
 
     # Reminder fields

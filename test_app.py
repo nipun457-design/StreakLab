@@ -143,6 +143,170 @@ class StreakLabTestCase(unittest.TestCase):
         missing_res = self.client.put('/api/habits/8888', json={"name": "X"})
         self.assertEqual(missing_res.status_code, 404)
 
+    def test_habit_update_persists_changes_by_returned_id(self):
+        """Regression Test: Updating a habit by its returned ID persists all fields correctly."""
+        # 1. Create a habit (e.g. lunch)
+        create_res = self.client.post('/api/habits', json={
+            "name": "lunch",
+            "description": "Quick lunch",
+            "category": "Health",
+            "time_of_day": "Afternoon",
+            "target_time": "12:30 PM",
+            "target_frequency": "daily"
+        })
+        self.assertEqual(create_res.status_code, 201)
+        created = create_res.get_json()
+        habit_id = created['id']
+        self.assertIsInstance(habit_id, int)
+
+        # 2. Update all fields including scheduled time, frequency, and reminder settings
+        update_payload = {
+            "name": "Healthy Nutritious Lunch",
+            "description": "Mindful nutritious lunch with water and salad",
+            "category": "Health",
+            "time_of_day": "Afternoon",
+            "target_frequency": "Weekdays",
+            "target_time": "01:00 PM",
+            "reminder_time": "12:50",
+            "reminder_enabled": True
+        }
+        update_res = self.client.put(f'/api/habits/{habit_id}', json=update_payload)
+        self.assertEqual(update_res.status_code, 200)
+        updated = update_res.get_json()
+
+        self.assertEqual(updated['id'], habit_id)
+        self.assertEqual(updated['name'], "Healthy Nutritious Lunch")
+        self.assertEqual(updated['description'], "Mindful nutritious lunch with water and salad")
+        self.assertEqual(updated['category'], "Health")
+        self.assertEqual(updated['time_of_day'], "Afternoon")
+        self.assertEqual(updated['target_frequency'], "Weekdays")
+        self.assertEqual(updated['target_time'], "01:00 PM")
+        self.assertEqual(updated['reminder_time'], "12:50")
+        self.assertTrue(updated['reminder_enabled'])
+
+        # 3. Confirm GET /api/habits/<id> returns the updated state
+        get_res = self.client.get(f'/api/habits/{habit_id}')
+        self.assertEqual(get_res.status_code, 200)
+        fetched = get_res.get_json()
+        self.assertEqual(fetched['name'], "Healthy Nutritious Lunch")
+        self.assertEqual(fetched['target_frequency'], "Weekdays")
+        self.assertEqual(fetched['target_time'], "01:00 PM")
+        self.assertEqual(fetched['reminder_time'], "12:50")
+
+    def test_habit_update_does_not_create_duplicates(self):
+        """Regression Test: Multiple updates to the same habit modify it in-place without creating duplicate rows."""
+        create_res = self.client.post('/api/habits', json={
+            "name": "lunch",
+            "category": "Health"
+        })
+        self.assertEqual(create_res.status_code, 201)
+        habit_id = create_res.get_json()['id']
+
+        # Update 1
+        res1 = self.client.put(f'/api/habits/{habit_id}', json={"name": "lunch v1"})
+        self.assertEqual(res1.status_code, 200)
+
+        # Update 2
+        res2 = self.client.put(f'/api/habits/{habit_id}', json={"name": "lunch v2", "target_time": "01:15 PM"})
+        self.assertEqual(res2.status_code, 200)
+
+        # Update 3
+        res3 = self.client.put(f'/api/habits/{habit_id}', json={"name": "lunch final", "target_frequency": "Weekends"})
+        self.assertEqual(res3.status_code, 200)
+
+        # Verify only 1 habit exists in the database
+        with app.app_context():
+            db = get_db()
+            habit_count = db.execute("SELECT COUNT(*) as cnt FROM habits").fetchone()['cnt']
+            reminder_count = db.execute("SELECT COUNT(*) as cnt FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()['cnt']
+            self.assertEqual(habit_count, 1)
+            self.assertEqual(reminder_count, 1)
+
+        # Verify GET /api/habits returns exactly 1 habit
+        list_res = self.client.get('/api/habits')
+        self.assertEqual(list_res.status_code, 200)
+        self.assertEqual(len(list_res.get_json()), 1)
+        self.assertEqual(list_res.get_json()[0]['name'], "lunch final")
+
+    def test_habit_update_nonexistent_id_returns_404(self):
+        """Regression Test: PUT /api/habits/<id> returns 404 with error message for non-existent IDs."""
+        res_high = self.client.put('/api/habits/999999', json={"name": "Ghost Habit"})
+        self.assertEqual(res_high.status_code, 404)
+        data = res_high.get_json()
+        self.assertEqual(data.get('error'), "Habit not found")
+
+        res_zero = self.client.put('/api/habits/0', json={"name": "Zero Habit"})
+        self.assertEqual(res_zero.status_code, 404)
+        self.assertEqual(res_zero.get_json().get('error'), "Habit not found")
+
+    def test_habit_update_scheduled_time_and_reminder_settings(self):
+        """Regression Test: Updating scheduled time and reminder settings synchronizes across tables."""
+        create_res = self.client.post('/api/habits', json={
+            "name": "Afternoon Walk",
+            "target_time": "03:00 PM",
+            "reminder_time": "15:00",
+            "reminder_enabled": True
+        })
+        self.assertEqual(create_res.status_code, 201)
+        habit_id = create_res.get_json()['id']
+
+        # Disable reminder and change time
+        update_res = self.client.put(f'/api/habits/{habit_id}', json={
+            "target_time": "04:30 PM",
+            "reminder_time": "16:30",
+            "reminder_enabled": False
+        })
+        self.assertEqual(update_res.status_code, 200)
+
+        with app.app_context():
+            db = get_db()
+            h_row = db.execute("SELECT target_time, reminder_time, reminder_enabled FROM habits WHERE id = ?", (habit_id,)).fetchone()
+            self.assertEqual(h_row['target_time'], "04:30 PM")
+            self.assertEqual(h_row['reminder_time'], "16:30")
+            self.assertEqual(h_row['reminder_enabled'], 0)
+
+            rem_row = db.execute("SELECT reminder_time, enabled FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()
+            self.assertEqual(rem_row['reminder_time'], "16:30")
+            self.assertEqual(rem_row['enabled'], 0)
+
+        # Re-enable reminder with 12h time format conversion
+        re_enable_res = self.client.put(f'/api/habits/{habit_id}', json={
+            "reminder_time": "05:00 PM",
+            "reminder_enabled": True
+        })
+        self.assertEqual(re_enable_res.status_code, 200)
+
+        with app.app_context():
+            db = get_db()
+            rem_row = db.execute("SELECT reminder_time, enabled FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()
+            self.assertEqual(rem_row['reminder_time'], "17:00")
+            self.assertEqual(rem_row['enabled'], 1)
+
+    def test_habit_update_frequency_variations(self):
+        """Regression Test: Habit frequency updates support Daily, Weekdays, and Weekends variations."""
+        create_res = self.client.post('/api/habits', json={"name": "Frequency Test"})
+        habit_id = create_res.get_json()['id']
+
+        for freq in ["Daily", "Weekdays", "Weekends", "daily", "weekdays"]:
+            res = self.client.put(f'/api/habits/{habit_id}', json={"target_frequency": freq})
+            self.assertEqual(res.status_code, 200)
+            self.assertEqual(res.get_json()['target_frequency'], freq)
+
+    def test_get_db_self_healing_table_creation(self):
+        """Regression Test: get_db() ensures habits table is initialized if connected to a fresh database."""
+        temp_fd, temp_path = tempfile.mkstemp(suffix='_fresh.db')
+        os.close(temp_fd)
+        try:
+            with app.test_request_context():
+                app.config['DATABASE'] = temp_path
+                db = get_db()
+                check = db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='habits'").fetchone()
+                self.assertIsNotNone(check)
+                self.assertEqual(check['name'], 'habits')
+        finally:
+            if os.path.exists(temp_path):
+                os.unlink(temp_path)
+
     def test_deactivate_habit(self):
         """DELETE /api/habits/<id> sets active=0 instead of dropping rows."""
         create_res = self.client.post('/api/habits', json={"name": "Archived Habit"})
@@ -2604,6 +2768,294 @@ class StreakLabTestCase(unittest.TestCase):
         # Unrecognized value defaults to system fallback
         self.assertEqual(get_effective_theme("unknown_pref", system_prefers_dark=True), "dark")
         self.assertEqual(get_effective_theme(None, system_prefers_dark=False), "light")
+
+
+class PersistentStorageAndPushNotificationsTestCase(unittest.TestCase):
+    """
+    Regression and feature tests for Priorities 1-5:
+    - Database persistence across separate requests and application restarts
+    - Habit create, edit, delete, and retrieval with correct IDs
+    - No duplicate creation on habit updates; 404 for nonexistent IDs
+    - Web Push status, subscription, and unsubscription endpoints
+    - Scheduled reminder triggers and CRON_SECRET authentication
+    - Web Push delivery handling, duplicate suppression, and expired subscriptions
+    - Service worker root route /sw.js with Service-Worker-Allowed header
+    """
+
+    def setUp(self):
+        self.db_fd, self.db_path = tempfile.mkstemp(suffix='.db')
+        app.config['DATABASE'] = self.db_path
+        app.config['TESTING'] = True
+        self.client = app.test_client()
+        with app.app_context():
+            init_db()
+
+    def tearDown(self):
+        os.close(self.db_fd)
+        if os.path.exists(self.db_path):
+            try:
+                os.unlink(self.db_path)
+            except Exception:
+                pass
+
+    def test_database_persistence_across_application_restarts(self):
+        """Data stored in one request persists across client sessions and simulated app restart."""
+        # 1. Create a habit with full metadata
+        create_res = self.client.post('/api/habits', json={
+            "name": "Night Reading",
+            "description": "Read 20 pages",
+            "category": "Learning",
+            "time_of_day": "Evening",
+            "target_time": "09:30 PM",
+            "reminder_time": "21:30",
+            "reminder_enabled": True,
+            "target_frequency": "daily"
+        })
+        self.assertEqual(create_res.status_code, 201)
+        habit_data = create_res.get_json()
+        habit_id = habit_data['id']
+
+        # 2. Add a daily check-in record
+        rec_res = self.client.post('/api/records', json={
+            "habit_id": habit_id,
+            "record_date": "2026-10-24",
+            "status": "completed"
+        })
+        self.assertEqual(rec_res.status_code, 201)
+
+        # 3. Add a goal and milestone
+        goal_res = self.client.post('/api/goals', json={
+            "habit_id": habit_id,
+            "target_type": "weekly_completions",
+            "target_value": 5
+        })
+        self.assertEqual(goal_res.status_code, 201)
+
+        # 4. Simulate complete application shutdown and restart
+        # Reset Flask test client, but point to the exact same persistent database
+        new_client = app.test_client()
+        with app.app_context():
+            db = get_db()
+            # Verify habit persists
+            h_row = db.execute("SELECT * FROM habits WHERE id = ?", (habit_id,)).fetchone()
+            self.assertIsNotNone(h_row)
+            self.assertEqual(h_row['name'], "Night Reading")
+            self.assertEqual(h_row['reminder_time'], "21:30")
+
+            # Verify record persists
+            r_row = db.execute("SELECT * FROM habit_records WHERE habit_id = ?", (habit_id,)).fetchone()
+            self.assertIsNotNone(r_row)
+            self.assertEqual(r_row['status'], "completed")
+
+            # Verify reminder persists in habit_reminders
+            rem_row = db.execute("SELECT * FROM habit_reminders WHERE habit_id = ?", (habit_id,)).fetchone()
+            self.assertIsNotNone(rem_row)
+            self.assertEqual(rem_row['reminder_time'], "21:30")
+            self.assertEqual(rem_row['enabled'], 1)
+
+            # Verify goal persists in habit_goals
+            g_row = db.execute("SELECT * FROM habit_goals WHERE habit_id = ?", (habit_id,)).fetchone()
+            self.assertIsNotNone(g_row)
+            self.assertEqual(g_row['target_value'], 5)
+
+        # 5. Verify through the REST API on the new client
+        get_res = new_client.get('/api/habits')
+        self.assertEqual(get_res.status_code, 200)
+        habits = get_res.get_json()
+        matching = [h for h in habits if h['id'] == habit_id]
+        self.assertEqual(len(matching), 1)
+        self.assertEqual(matching[0]['name'], "Night Reading")
+
+    def test_habit_edit_preserves_id_and_creates_no_duplicates(self):
+        """Editing an existing habit updates the record in-place without creating duplicates."""
+        # Create habit
+        create_res = self.client.post('/api/habits', json={
+            "name": "Lunch Break Walk",
+            "category": "Health",
+            "target_frequency": "Daily",
+            "target_time": "12:30 PM",
+            "reminder_time": "12:30"
+        })
+        self.assertEqual(create_res.status_code, 201)
+        habit_id = create_res.get_json()['id']
+
+        # Update habit: change name, category, reminder time
+        put_res = self.client.put(f'/api/habits/{habit_id}', json={
+            "name": "Lunch Break Power Walk",
+            "category": "Fitness",
+            "target_frequency": "Weekdays",
+            "target_time": "01:00 PM",
+            "reminder_time": "13:00",
+            "reminder_enabled": False
+        })
+        self.assertEqual(put_res.status_code, 200)
+        updated = put_res.get_json()
+        self.assertEqual(updated['id'], habit_id)
+        self.assertEqual(updated['name'], "Lunch Break Power Walk")
+        self.assertEqual(updated['category'], "Fitness")
+        self.assertEqual(updated['target_frequency'], "Weekdays")
+
+        # Confirm via GET /api/habits: exactly 1 habit exists with the updated properties
+        list_res = self.client.get('/api/habits')
+        self.assertEqual(list_res.status_code, 200)
+        all_habits = list_res.get_json()
+        self.assertEqual(len(all_habits), 1)
+        self.assertEqual(all_habits[0]['id'], habit_id)
+        self.assertEqual(all_habits[0]['name'], "Lunch Break Power Walk")
+
+        # Confirm 404 for nonexistent habit ID
+        bad_res = self.client.put('/api/habits/999999', json={
+            "name": "Does Not Exist"
+        })
+        self.assertEqual(bad_res.status_code, 404)
+        self.assertIn("Habit not found", bad_res.get_json().get("error", ""))
+
+    def test_push_endpoints_lifecycle(self):
+        """Test push status, subscription registration, and unsubscription."""
+        # 1. GET /api/push/status
+        status_res = self.client.get('/api/push/status')
+        self.assertEqual(status_res.status_code, 200)
+        status_data = status_res.get_json()
+        self.assertIn('is_configured', status_data)
+
+        # 2. POST /api/push/subscribe
+        sub_payload = {
+            "subscription": {
+                "endpoint": "https://fcm.googleapis.com/fcm/send/test-sub-123",
+                "keys": {
+                    "p256dh": "test-p256dh-key",
+                    "auth": "test-auth-secret"
+                }
+            },
+            "timezone": "America/New_York",
+            "user_agent": "Mozilla/5.0 TestBrowser"
+        }
+        sub_res = self.client.post('/api/push/subscribe', json=sub_payload)
+        self.assertEqual(sub_res.status_code, 201)
+        self.assertEqual(sub_res.get_json()['status'], 'subscribed')
+
+        # Verify subscription is saved in database
+        with app.app_context():
+            db = get_db()
+            sub_row = db.execute("SELECT * FROM push_subscriptions WHERE endpoint = ?", (sub_payload['subscription']['endpoint'],)).fetchone()
+            self.assertIsNotNone(sub_row)
+            self.assertEqual(sub_row['timezone'], "America/New_York")
+            self.assertEqual(sub_row['active'], 1)
+
+        # 3. POST /api/push/unsubscribe
+        unsub_res = self.client.post('/api/push/unsubscribe', json={
+            "endpoint": "https://fcm.googleapis.com/fcm/send/test-sub-123"
+        })
+        self.assertEqual(unsub_res.status_code, 200)
+        self.assertEqual(unsub_res.get_json()['status'], 'unsubscribed')
+
+        # Verify subscription is deactivated
+        with app.app_context():
+            db = get_db()
+            sub_row = db.execute("SELECT * FROM push_subscriptions WHERE endpoint = ?", (sub_payload['subscription']['endpoint'],)).fetchone()
+            self.assertEqual(sub_row['active'], 0)
+
+    def test_cron_reminders_authentication(self):
+        """Triggering /api/cron/reminders requires CRON_SECRET if configured."""
+        orig_secret = os.environ.get('CRON_SECRET')
+        try:
+            os.environ['CRON_SECRET'] = 'test-secret-token-12345'
+
+            # 1. Request without secret returns 401
+            unauth_res = self.client.get('/api/cron/reminders')
+            self.assertEqual(unauth_res.status_code, 401)
+            self.assertIn("Unauthorized", unauth_res.get_json().get("error", ""))
+
+            # 2. Request with invalid secret returns 401
+            bad_res = self.client.get('/api/cron/reminders', headers={
+                "Authorization": "Bearer wrong-secret"
+            })
+            self.assertEqual(bad_res.status_code, 401)
+
+            # 3. Request with valid Authorization header returns 200
+            good_res = self.client.get('/api/cron/reminders', headers={
+                "Authorization": "Bearer test-secret-token-12345"
+            })
+            self.assertEqual(good_res.status_code, 200)
+            self.assertIn(good_res.get_json().get('status'), ['ok', 'skipped'])
+
+            # 4. Request with valid x-cron-secret header returns 200
+            header_res = self.client.get('/api/cron/reminders', headers={
+                "x-cron-secret": "test-secret-token-12345"
+            })
+            self.assertEqual(header_res.status_code, 200)
+            self.assertIn(header_res.get_json().get('status'), ['ok', 'skipped'])
+
+        finally:
+            if orig_secret is None:
+                os.environ.pop('CRON_SECRET', None)
+            else:
+                os.environ['CRON_SECRET'] = orig_secret
+
+    def test_service_worker_route(self):
+        """GET /sw.js serves the root service worker with Service-Worker-Allowed header."""
+        res = self.client.get('/sw.js')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.mimetype, 'application/javascript')
+        self.assertEqual(res.headers.get('Service-Worker-Allowed'), '/')
+        self.assertIn(b'addEventListener', res.data)
+        self.assertIn(b'push', res.data)
+        self.assertIn(b'notificationclick', res.data)
+
+    def test_push_delivery_and_duplicate_suppression_mocked(self):
+        """Server-side push delivery suppresses duplicates and handles delivery safely."""
+        from zoneinfo import ZoneInfo
+        from datetime import datetime
+        import push_service
+
+        # Configure mock VAPID credentials in test environment
+        orig_pub = os.environ.get('VAPID_PUBLIC_KEY')
+        orig_priv = os.environ.get('VAPID_PRIVATE_KEY')
+        os.environ['VAPID_PUBLIC_KEY'] = 'test-mock-public-key'
+        os.environ['VAPID_PRIVATE_KEY'] = 'test-mock-private-key'
+
+        try:
+            # Create a habit with reminder
+            create_res = self.client.post('/api/habits', json={
+                "name": "Morning Exercise",
+                "reminder_time": "08:00",
+                "reminder_enabled": True
+            })
+            habit_id = create_res.get_json()['id']
+
+            # Subscribe a device
+            self.client.post('/api/push/subscribe', json={
+                "subscription": {
+                    "endpoint": "https://fcm.googleapis.com/fcm/send/device-mock-1",
+                    "keys": {"p256dh": "p256dh-mock", "auth": "auth-mock"}
+                },
+                "timezone": "UTC"
+            })
+
+            # Mock webpush to avoid real external network call
+            with patch('push_service.webpush', return_value=MagicMock(status_code=201)) as mock_push:
+                with app.app_context():
+                    db = get_db()
+                    fake_now = datetime(2026, 10, 24, 8, 0, tzinfo=ZoneInfo("UTC"))
+                    # First call: should deliver push
+                    res1 = push_service.check_and_send_due_reminders(db, now_override=fake_now)
+                    self.assertEqual(res1['sent'], 1)
+                    self.assertEqual(mock_push.call_count, 1)
+
+                    # Second call on same day & minute: duplicate suppressed!
+                    res2 = push_service.check_and_send_due_reminders(db, now_override=fake_now)
+                    self.assertEqual(res2['sent'], 0)
+                    # mock_push was not called again
+                    self.assertEqual(mock_push.call_count, 1)
+        finally:
+            if orig_pub is None:
+                os.environ.pop('VAPID_PUBLIC_KEY', None)
+            else:
+                os.environ['VAPID_PUBLIC_KEY'] = orig_pub
+            if orig_priv is None:
+                os.environ.pop('VAPID_PRIVATE_KEY', None)
+            else:
+                os.environ['VAPID_PRIVATE_KEY'] = orig_priv
 
 
 if __name__ == '__main__':
