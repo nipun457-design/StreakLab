@@ -3415,6 +3415,31 @@ async function initServiceWorkerAndPush() {
     swRegistration = reg;
     currentPushSubscription = await reg.pushManager.getSubscription();
 
+    // Auto-sync existing permission with push subscription if VAPID is configured
+    if (typeof Notification !== "undefined" && Notification.permission === "granted" && backendVapidPublicKey && !currentPushSubscription) {
+      try {
+        const applicationServerKey = urlBase64ToUint8Array(backendVapidPublicKey);
+        const sub = await reg.pushManager.subscribe({
+          userVisibleOnly: true,
+          applicationServerKey: applicationServerKey
+        });
+        currentPushSubscription = sub;
+
+        const userTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+        await fetch("/api/push/subscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            subscription: sub.toJSON(),
+            timezone: userTz,
+            user_agent: navigator.userAgent
+          })
+        });
+      } catch (autoErr) {
+        console.warn("Auto-sync push subscription notice:", autoErr);
+      }
+    }
+
     updatePushSubscriptionUI();
   } catch (err) {
     console.error("Service worker registration or push check failed:", err);
@@ -3480,6 +3505,13 @@ function updatePushSubscriptionUI() {
     }
     if (testBtn) testBtn.classList.add("d-none");
     if (disableBtn) disableBtn.classList.add("d-none");
+    if (descEl) {
+      if (isPermGranted) {
+        descEl.textContent = "Browser permission granted. Tap 'Enable Mobile Push' to register background device notifications.";
+      } else {
+        descEl.textContent = "Receive real operating-system alerts on your phone or desktop even when StreakLab is closed.";
+      }
+    }
   }
 }
 
@@ -3535,6 +3567,25 @@ async function subscribeDeviceToPush() {
     const applicationServerKey = urlBase64ToUint8Array(backendVapidPublicKey);
 
     let sub = await reg.pushManager.getSubscription();
+    // If a subscription exists with a different VAPID key, refresh it
+    if (sub && backendVapidPublicKey && sub.options && sub.options.applicationServerKey) {
+      const currentKeyBytes = new Uint8Array(sub.options.applicationServerKey);
+      const expectedKeyBytes = urlBase64ToUint8Array(backendVapidPublicKey);
+      let keysMatch = (currentKeyBytes.length === expectedKeyBytes.length);
+      if (keysMatch) {
+        for (let i = 0; i < currentKeyBytes.length; i++) {
+          if (currentKeyBytes[i] !== expectedKeyBytes[i]) {
+            keysMatch = false;
+            break;
+          }
+        }
+      }
+      if (!keysMatch) {
+        await sub.unsubscribe().catch(() => {});
+        sub = null;
+      }
+    }
+
     if (!sub) {
       sub = await reg.pushManager.subscribe({
         userVisibleOnly: true,
@@ -3723,14 +3774,10 @@ async function requestBrowserNotificationPermission() {
 
   if (result === "granted") {
     showToast("Browser notifications enabled! 🔔", "success");
-    try {
-      new Notification("StreakLab Reminders Active", {
-        body: "Scheduled reminders will notify you when habits are due while this site is open.",
-        icon: "/static/favicon.ico"
-      });
-    } catch (e) {
-      console.warn("Could not dispatch welcome notification:", e);
-    }
+    dispatchHabitNotification("StreakLab Reminders Active", {
+      body: "Scheduled reminders will notify you when habits are due while this site is open.",
+      icon: "/static/icons/icon-192.png"
+    }).catch(e => console.warn("Could not dispatch welcome notification:", e));
     if ("serviceWorker" in navigator && "PushManager" in window) {
       subscribeDeviceToPush();
     }
@@ -3916,10 +3963,56 @@ async function deleteReminderByHabitId(habitId) {
 }
 
 /**
+ * Dispatches a native browser or mobile OS notification.
+ * Mobile platforms (Chrome Android, iOS PWA) prohibit `new Notification()`
+ * from window context (throws TypeError: Illegal constructor).
+ * This helper first utilizes ServiceWorkerRegistration.showNotification(),
+ * falling back to the Notification constructor for desktop environments.
+ */
+async function dispatchHabitNotification(title, options = {}) {
+  const perm = (typeof Notification !== "undefined") ? Notification.permission : "unsupported";
+  if (perm !== "granted") {
+    return false;
+  }
+
+  // 1. Priority: Use ServiceWorkerRegistration.showNotification (required on Chrome Android & iOS Safari PWA)
+  if ("serviceWorker" in navigator) {
+    try {
+      const reg = swRegistration || (await navigator.serviceWorker.ready.catch(() => null));
+      if (reg && typeof reg.showNotification === "function") {
+        await reg.showNotification(title, {
+          icon: "/static/icons/icon-192.png",
+          badge: "/static/icons/icon-192.png",
+          ...options
+        });
+        return true;
+      }
+    } catch (swErr) {
+      console.warn("ServiceWorker showNotification encountered an error:", swErr);
+    }
+  }
+
+  // 2. Fallback: window Notification constructor (desktop browsers)
+  try {
+    if (typeof Notification === "function") {
+      new Notification(title, {
+        icon: "/static/icons/icon-192.png",
+        ...options
+      });
+      return true;
+    }
+  } catch (notifErr) {
+    console.warn("Window Notification constructor threw:", notifErr);
+  }
+
+  return false;
+}
+
+/**
  * 60-second ticker: checks active reminders against current local time (HH:MM).
  * Strictly avoids notifying if the habit is already completed today or was already notified.
  */
-function checkRemindersTick() {
+async function checkRemindersTick() {
   const now = new Date();
   const hours = String(now.getHours()).padStart(2, "0");
   const minutes = String(now.getMinutes()).padStart(2, "0");
@@ -3943,52 +4036,51 @@ function checkRemindersTick() {
         enabled: h.reminder.enabled ? 1 : 0
       }));
 
-  activeList.forEach(r => {
-    if (!r.enabled) return;
-    if (r.reminder_time !== currentHHMM) return;
+  for (const r of activeList) {
+    if (!r.enabled) continue;
+    if (r.reminder_time !== currentHHMM) continue;
 
     const habit = habits.find(h => h.id === r.habit_id);
     // If habit is deleted, inactive, or missing from active habits, do not notify!
-    if (!habit || habit.active === 0) return;
+    if (!habit || habit.active === 0) continue;
 
     // RULE 6: Do not notify for a habit that is already completed for the relevant day!
-    if (habit.status === "completed") return;
+    if (habit.status === "completed") continue;
 
     const habitName = habit.name || (r.habit_name || `Habit #${r.habit_id}`);
 
     // RULE 5: Avoid repeatedly notifying users for the same reminder during the same scheduled occurrence
     const occurrenceKey = `${today}_${r.habit_id}_${r.reminder_time}`;
-    if (notifiedRemindersToday.has(occurrenceKey)) return;
+    if (notifiedRemindersToday.has(occurrenceKey)) continue;
 
     // Double check localStorage for multi-tab suppression
     const storageKey = `streaklab_reminded_${occurrenceKey}`;
     try {
       if (localStorage.getItem(storageKey)) {
         notifiedRemindersToday.add(occurrenceKey);
-        return;
+        continue;
       }
       localStorage.setItem(storageKey, "1");
     } catch (e) {}
 
     notifiedRemindersToday.add(occurrenceKey);
 
-    // 1. Browser Notification if permitted
+    // 1. Dispatch Notification via Service Worker or Browser API
     let browserFired = false;
-    if ("Notification" in window && Notification.permission === "granted") {
-      try {
-        new Notification(`StreakLab: ${habitName}`, {
-          body: `Scheduled habit reminder for ${r.reminder_time}. Keep your streak alive!`,
-          icon: "/static/favicon.ico"
-        });
-        browserFired = true;
-      } catch (err) {
-        console.warn("Could not fire browser notification:", err);
-      }
+    try {
+      browserFired = await dispatchHabitNotification(`StreakLab: ${habitName}`, {
+        body: `Scheduled habit reminder for ${r.reminder_time}. Keep your streak alive!`,
+        tag: `streaklab-reminder-${r.habit_id}`,
+        renotify: true,
+        data: { url: "/", habitId: r.habit_id }
+      });
+    } catch (dispatchErr) {
+      console.warn("Could not dispatch habit reminder notification:", dispatchErr);
     }
 
     // 2. Useful In-App Companion / Fallback Banner (guaranteed visibility)
     showInAppReminderAlert(r.habit_id, habitName, r.reminder_time, browserFired);
-  });
+  }
 }
 
 /**
@@ -4005,9 +4097,17 @@ function showInAppReminderAlert(habitId, habitName, reminderTime, browserFired) 
   alertDiv.id = alertId;
   alertDiv.className = "reminder-alert-banner d-flex flex-column flex-sm-row align-items-sm-center justify-content-between gap-3 mb-3";
 
-  const noteText = browserFired
-    ? "Notification dispatched to your browser."
-    : "Browser notification is disabled or unsupported — reminder displayed in-app.";
+  const currentPerm = (typeof Notification !== "undefined") ? Notification.permission : "unsupported";
+  let noteText = "";
+  if (browserFired) {
+    noteText = "Notification dispatched to your device.";
+  } else if (currentPerm === "granted") {
+    noteText = "Reminder alert displayed in-app.";
+  } else if (currentPerm === "denied") {
+    noteText = "Notifications are blocked in browser settings — reminder displayed in-app.";
+  } else {
+    noteText = "Browser notification is disabled or unsupported — reminder displayed in-app.";
+  }
 
   alertDiv.innerHTML = `
     <div class="d-flex align-items-center gap-3">

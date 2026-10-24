@@ -3057,6 +3057,38 @@ class PersistentStorageAndPushNotificationsTestCase(unittest.TestCase):
             else:
                 os.environ['VAPID_PRIVATE_KEY'] = orig_priv
 
+    def test_mobile_browser_notification_dispatch_and_in_app_warning_resolution(self):
+        """
+        Verify that mobile notifications use ServiceWorkerRegistration.showNotification(),
+        avoiding illegal constructor TypeErrors on mobile browsers, and ensuring
+        granted permissions never display false 'disabled or unsupported' warnings.
+        """
+        with open('static/script.js', 'r', encoding='utf-8') as f:
+            js = f.read()
+
+        # 1. Verify dispatchHabitNotification helper exists and prefers ServiceWorker showNotification
+        self.assertIn('async function dispatchHabitNotification', js)
+        self.assertIn('"serviceWorker" in navigator', js)
+        self.assertIn('reg.showNotification', js)
+
+        # 2. Verify checkRemindersTick uses dispatchHabitNotification
+        self.assertIn('await dispatchHabitNotification', js)
+
+        # 3. Verify showInAppReminderAlert evaluates currentPerm correctly
+        self.assertIn('currentPerm === "granted"', js)
+        self.assertIn('Notification dispatched to your device', js)
+        self.assertIn('Reminder alert displayed in-app', js)
+
+        # 4. Verify auto-sync of push subscription when permission is already granted
+        self.assertIn('Notification.permission === "granted" && backendVapidPublicKey && !currentPushSubscription', js)
+
+        # 5. Verify /api/push/status endpoint contract
+        res = self.client.get('/api/push/status')
+        self.assertEqual(res.status_code, 200)
+        status_data = res.get_json()
+        self.assertIn('is_configured', status_data)
+        self.assertIn('vapid_public_key', status_data)
+
 
 if __name__ == '__main__':
     unittest.main()
