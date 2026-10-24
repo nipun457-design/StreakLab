@@ -2432,6 +2432,26 @@ class StreakLabTestCase(unittest.TestCase):
         self.assertNotIn('Phase 2', html)
         self.assertNotIn('Phase 1', html)
 
+        # Verify neutral public greeting without personal names
+        self.assertIn("Welcome to StreakLab", html)
+        self.assertNotIn("Welcome back, Nipun", html)
+        self.assertNotIn("Nipun", html)
+
+    def test_ui_neutral_welcome_greeting_no_personal_identity(self):
+        """Homepage renders a neutral, public greeting ('Welcome to StreakLab') and never leaks personal identities."""
+        res = self.client.get('/')
+        self.assertEqual(res.status_code, 200)
+        html = res.data.decode('utf-8')
+
+        # Neutral greeting is rendered
+        self.assertIn('class="welcome-title', html)
+        self.assertIn('Welcome to StreakLab', html)
+
+        # Ensure personal name is completely absent from user-facing HTML
+        self.assertNotIn('Welcome back, Nipun', html)
+        self.assertNotIn('Nipun', html)
+
+
     # -----------------------------------------------------------------------
     # DARK MODE TESTS: FOUC PREVENTION, PERSISTENCE, SYSTEM FALLBACK, UI & CHARTS
     # -----------------------------------------------------------------------
